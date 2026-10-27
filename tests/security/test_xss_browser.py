@@ -58,7 +58,11 @@ def poisoned():
                                      "parent": P("parent mesh", True),
                                      "up": {"type": "Wi-Fi", "rate": 100000, "max": 200000, "signal": -60},
                                      "clients": [{"name": P("client rep", True), "band": "cavo"}]}]},
-                 "fiber": {"state": P("stato fibra")}}
+                 "fiber": {"state": P("stato fibra")},
+                 "netdev": [{"name": P("nome disp. in rete"), "ip": "192.168.1.60", "on": True, "via": "wifi",
+                             "band": P("banda disp.", True), "node": P("nodo disp.", True), "signal": -80, "rate": 20,
+                             "model": P("modello disp.")},
+                            {"name": P("disp. spento"), "ip": "192.168.1.61", "on": False, "model": P("modello spento")}]}
         boxes = [{"id": "b2", "name": P("nome fritz 2", True), "role": "main", "model": P("modello 2"),
                   "ok": True}, {"id": "rep", "name": P("nome rep", True), "role": "wifi", "ok": True}]
         system = {"hostname": P("hostname sonda"), "os": P("os sonda"), "model": P("modello pi"),
@@ -131,6 +135,18 @@ def visit_user(page, srv, cookie, key=None):
     for tab in ("view", "probes", "checks", "notify", "backup"):
         page.evaluate(f"showTab('{tab}')")
         page.wait_for_timeout(500)
+    # dispositivi in rete: anche quelli spenti e la finestra di «+ Monitora»
+    page.evaluate("showPage('net', true, 'fritzbox')")
+    page.wait_for_timeout(500)
+    page.evaluate("document.querySelectorAll('section.netdev .nd-foot input').forEach(c => c.click())")
+    page.wait_for_timeout(300)
+    for n in page.query_selector_all("section.netdev .mon button")[:2]:
+        try:
+            n.click(timeout=500)
+            page.wait_for_timeout(300)
+            page.evaluate("document.querySelectorAll('dialog[open]').forEach(d => d.close())")
+        except Exception:  # noqa: BLE001
+            pass
     # apre lo storico di ogni dispositivo cliccabile e lo scudo del controllo di sicurezza
     page.evaluate("showPage('net', true, 'sonde')")
     page.wait_for_timeout(500)

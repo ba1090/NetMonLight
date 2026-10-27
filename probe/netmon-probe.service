@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261027-161500
+# netmon versione 1.1.20261027-171500
 [Unit]
 Description=netmon - sonda di rete
 After=network-online.target

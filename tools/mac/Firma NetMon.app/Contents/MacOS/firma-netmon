@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261027-161500
+# netmon versione 1.1.20261027-171500
 # «Firma NetMon» per il Mac: avvia il programma con la pagina nel browser (lo stesso di Windows,
 # compilato da tools/firma/build.sh) adatto a questo Mac. Se non c'è (per esempio nell'app che sta
 # dentro lo zip del pacchetto, che non porta gli eseguibili), usa le finestre di sistema di

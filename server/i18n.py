@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261027-161500"
+__version__ = "1.1.20261027-171500"
 import json
 import re
 
@@ -4828,6 +4828,41 @@ for _it, _tr in {
     'La password del file deve avere almeno {0} caratteri.': ('The file password must be at least {0} characters long.', 'Das Dateipasswort muss mindestens {0} Zeichen lang sein.', 'Le mot de passe du fichier doit comporter au moins {0} caractères.'),
     'Manca la libreria per la cifratura (cryptography): aggiorna il server con installa-server.sh --aggiorna.': ('The encryption library (cryptography) is missing: update the server with installa-server.sh --aggiorna.', 'Die Verschlüsselungsbibliothek (cryptography) fehlt: aktualisiere den Server mit installa-server.sh --aggiorna.', 'La bibliothèque de chiffrement (cryptography) manque : mets à jour le serveur avec installa-server.sh --aggiorna.'),
     'Password del file sbagliata, oppure file modificato o danneggiato: non si può aprire.': ('Wrong file password, or the file was modified or damaged: it cannot be opened.', 'Falsches Dateipasswort, oder die Datei wurde verändert oder beschädigt: sie lässt sich nicht öffnen.', "Mot de passe du fichier erroné, ou fichier modifié ou endommagé : impossible de l'ouvrir."),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+
+# Dispositivi in rete (elenco del FRITZ!Box)
+for _it, _tr in {
+    "Dispositivi in rete": ("Devices on the network", "Geräte im Netzwerk", "Appareils sur le réseau"),
+    "Dispositivi in rete (elenco del FRITZ!Box)": ("Devices on the network (FRITZ!Box list)", "Geräte im Netzwerk (Liste der FRITZ!Box)", "Appareils sur le réseau (liste de la FRITZ!Box)"),
+    "{0} collegato ora": ("{0} connected now", "{0} jetzt verbunden", "{0} connecté maintenant"),
+    "{0} collegati ora": ("{0} connected now", "{0} jetzt verbunden", "{0} connectés maintenant"),
+    "Cerca nome o IP": ("Search name or IP", "Name oder IP suchen", "Chercher un nom ou une IP"),
+    "Cavo": ("Cable", "Kabel", "Câble"),
+    "Segnale debole": ("Weak signal", "Schwaches Signal", "Signal faible"),
+    "Non monitorati": ("Not monitored", "Nicht überwacht", "Non surveillés"),
+    "Velocità": ("Speed", "Geschwindigkeit", "Vitesse"),
+    "LAN {0}": ("LAN {0}", "LAN {0}", "LAN {0}"),
+    "rete ospiti": ("guest network", "Gastnetz", "réseau invités"),
+    "non collegato": ("not connected", "nicht verbunden", "non connecté"),
+    "visto adesso": ("seen just now", "gerade gesehen", "vu à l'instant"),
+    "visto {0} min fa": ("seen {0} min ago", "vor {0} Min. gesehen", "vu il y a {0} min"),
+    "visto un'ora fa": ("seen an hour ago", "vor einer Stunde gesehen", "vu il y a une heure"),
+    "visto {0} ore fa": ("seen {0} hours ago", "vor {0} Stunden gesehen", "vu il y a {0} heures"),
+    "visto il {0}": ("seen on {0}", "gesehen am {0}", "vu le {0}"),
+    "Mostra anche i non collegati ({0})": ("Also show the disconnected ones ({0})", "Auch nicht verbundene anzeigen ({0})", "Afficher aussi les non connectés ({0})"),
+    "Dal FRITZ!Box.": ("From the FRITZ!Box.", "Von der FRITZ!Box.", "Depuis la FRITZ!Box."),
+    "Dal FRITZ!Box, aggiornato ora.": ("From the FRITZ!Box, updated just now.", "Von der FRITZ!Box, gerade aktualisiert.", "Depuis la FRITZ!Box, mis à jour à l'instant."),
+    "Dal FRITZ!Box, aggiornato {0} min fa.": ("From the FRITZ!Box, updated {0} min ago.", "Von der FRITZ!Box, vor {0} Min. aktualisiert.", "Depuis la FRITZ!Box, mis à jour il y a {0} min."),
+    "La velocità è quella del collegamento, non il traffico.": ("The speed is the link rate, not the traffic.", "Die Geschwindigkeit ist die Verbindungsrate, nicht der Datenverkehr.", "La vitesse est celle de la liaison, pas le trafic."),
+    "Nessun dispositivo in questo elenco.": ("No devices in this list.", "Keine Geräte in dieser Liste.", "Aucun appareil dans cette liste."),
+    "Nessun dispositivo con questo nome o IP.": ("No device with this name or IP.", "Kein Gerät mit diesem Namen oder dieser IP.", "Aucun appareil avec ce nom ou cette IP."),
+    "✓ monitorato": ("✓ monitored", "✓ überwacht", "✓ surveillé"),
+    "+ Monitora": ("+ Monitor", "+ Überwachen", "+ Surveiller"),
+    "via {0}": ("via {0}", "über {0}", "via {0}"),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)

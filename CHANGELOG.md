@@ -7,8 +7,17 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 27 ottobre 2026 (1.1.20261027-161500 · 1 versione) — NetMon Light
+## 27 ottobre 2026 (1.1.20261027-171500 · 2 versioni) — NetMon Light
 
+- **Dispositivi in rete** (da NetMon 1.1.20261027-160153): nella pagina *Stato rete › FRITZ!Box*, sotto i
+  riquadri, l'elenco dei dispositivi che il FRITZ!Box conosce, con nome, IP, collegamento (cavo con porta LAN, o
+  Wi-Fi con banda e repeater), segnale in dBm con le tacche e velocità del collegamento (non il traffico, che il
+  FRITZ!Box non dà per dispositivo). Filtri Wi-Fi, Cavo, Segnale debole (sotto −75 dBm) e Non monitorati, ricerca
+  per nome o IP e casella per mostrare anche i non collegati con «visto … fa». **+ Monitora** apre *Dispositivi*
+  della sonda con nome e IP già compilati. Sul telefono le righe diventano schede. Si aggiorna ogni 5 minuti con la
+  mappa mesh; si nasconde da *Visualizzazione → Riquadro FRITZ!Box → Dispositivi in rete*. Gli indirizzi MAC
+  restano sulla sonda: al server arrivano solo nome, IP e collegamento. Tradotto in inglese, tedesco e francese.
+  *Sonda, pagina utente, server.*
 - **NetMon Light: una sola VM per tutto.** Pagina di stato degli utenti, pannello di amministrazione (admin e
   utenti) e sonde dei vari utenti stanno sulla stessa VM. Tolti il gateway (`gateway/`, pagina d'accesso
   comune e smistamento), l'orchestratore (`ROLE=orchestratore`) e le VM probe (`VM_ID`, `GATEWAY_SECRET`,

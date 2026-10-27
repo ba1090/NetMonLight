@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261027-161500*
+*Versione di netmon: 1.1.20261027-171500*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -556,8 +556,19 @@ massimo e ultimo valore del totale; toccando le voci della legenda si nascondono
 totale si ricalcola. I clienti di un FRITZ si contano sulle sue reti (2,4, 5 e 6 GHz insieme), quindi
 nessun dispositivo è contato due volte; un repeater non collegato alla sonda non compare.
 
-Mesh e fibra si nascondono, come le altre voci, da **Impostazioni → Visualizzazione → Riquadro
-FRITZ!Box** (*Rete mesh*, *Stato della fibra*). Per leggerli l'utente del FRITZ!Box deve avere il
+**Dispositivi in rete.** Sotto i riquadri, nella pagina *Stato rete › FRITZ!Box*, la sezione
+**Dispositivi in rete** elenca i dispositivi che il FRITZ!Box conosce: nome, IP, collegamento (cavo
+con porta LAN, oppure Wi-Fi con banda e repeater a cui è agganciato), segnale in dBm con le tacche
+e velocità del collegamento. È la velocità negoziata del collegamento, non il traffico: il
+FRITZ!Box non dà il traffico del singolo dispositivo. L'elenco si aggiorna ogni 5 minuti, insieme
+alla mappa mesh. I filtri in alto mostrano Wi-Fi, cavo, segnale debole (sotto −75 dBm) e i
+dispositivi **non monitorati**, cioè non ancora tra i dispositivi pingati dalla sonda; la casella
+in fondo aggiunge quelli non collegati, con l'ultima volta che il server li ha visti. Il pulsante
+**+ Monitora** apre *Dispositivi* della sonda con una riga già compilata (nome e IP attuale): basta
+salvare. Gli indirizzi MAC restano sulla sonda e non vengono inviati al server.
+
+Mesh, fibra e dispositivi in rete si nascondono, come le altre voci, da **Impostazioni → Visualizzazione → Riquadro
+FRITZ!Box** (*Rete mesh*, *Stato della fibra*, *Dispositivi in rete*). Per leggerli l'utente del FRITZ!Box deve avere il
 permesso *Impostazioni FRITZ!Box*.
 
 **Più sonde nella stessa rete.** In **Impostazioni → Visualizzazione** puoi attivare

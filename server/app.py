@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261027-161500"
+__version__ = "1.1.20261027-171500"
 VERSION = __version__
 import asyncio
 import base64
@@ -710,7 +710,7 @@ MESH_KEEP = 900
 
 
 def carry_mesh(old, new, now):
-    for k in ("mesh", "fiber"):
+    for k in ("mesh", "fiber", "netdev"):
         if k in new:
             new[k + "_ts"] = now
         elif (old or {}).get(k) and now - float(old.get(k + "_ts") or 0) < MESH_KEEP:
@@ -754,6 +754,48 @@ def repeater_from_mesh(box, mesh):
     return box
 
 
+NETDEV_MAX = 200
+NETDEV_IP = re.compile(r"[0-9A-Fa-f:.]{0,45}")
+
+
+def clean_netdev(raw):
+    """Dispositivi in rete dal FRITZ!Box: solo i campi previsti, con tipi e lunghezze controllati
+    (nomi e modelli li sceglie chi è sulla rete)."""
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for d in raw[:NETDEV_MAX]:
+        if not isinstance(d, dict):
+            continue
+        txt = lambda k, n: CONTROL_CHARS.sub("", d[k])[:n] if isinstance(d.get(k), str) else ""   # noqa: E731
+        num = lambda k, lo, hi: (int(v) if (v := finite(d.get(k))) is not None and lo <= v <= hi else None)  # noqa: E731
+        ip = d.get("ip") if isinstance(d.get("ip"), str) and NETDEV_IP.fullmatch(d["ip"]) else ""
+        out.append({"name": txt("name", 60), "ip": ip, "on": d.get("on") is True,
+                    "via": d.get("via") if d.get("via") in ("wifi", "lan") else "",
+                    "port": num("port", 1, 64), "node": txt("node", 40) or None,
+                    "band": txt("band", 16) or None, "signal": num("signal", -120, 0),
+                    "rate": num("rate", 0, 100_000), "model": txt("model", 60), "guest": d.get("guest") is True})
+    return out
+
+
+def netdev_seen(p, devs, now):
+    """Ultima volta che il server ha visto collegato ogni dispositivo (per «visto 2 ore fa» di quelli
+    spenti): il FRITZ!Box non lo dice. Chiave: nome, o IP per i dispositivi senza nome."""
+    seen = p.setdefault("netdev_seen", {})
+    for d in devs:
+        k = d["name"] or d["ip"]
+        if not k:
+            continue
+        if d["on"]:
+            seen[k] = now
+        elif k in seen:
+            d["seen"] = seen[k]
+    if len(seen) > 500:                                   # i più vecchi se ne vanno
+        for k in sorted(seen, key=seen.get)[:len(seen) - 500]:
+            seen.pop(k)
+    return devs
+
+
 def clean_fritz(raw):
     """Tiene solo valori semplici e l'elenco ospiti, con dimensioni limitate e numeri finiti."""
     out = {}
@@ -768,6 +810,10 @@ def clean_fritz(raw):
             f = clean_fiber(v)
             if f:
                 out[k] = f
+        elif k == "netdev":
+            nd = clean_netdev(v)
+            if nd is not None:
+                out[k] = nd
         elif k == "wlans" and isinstance(v, list):
             out[k] = [{"ssid": str(w.get("ssid", ""))[:64], "band": str(w.get("band", ""))[:16],
                        "clients": int(finite(w.get("clients")) or 0), "guest": bool(w.get("guest"))}
@@ -2326,7 +2372,10 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
         p["applied_rev"] = r.config_rev
         if r.fritz is not None:
             fresca = isinstance(r.fritz.get("mesh"), dict)
-            p["fritz"] = carry_mesh(p.get("fritz"), clean_fritz(r.fritz), time.time())
+            nuovo = clean_fritz(r.fritz)
+            if "netdev" in nuovo:
+                netdev_seen(p, nuovo["netdev"], time.time())
+            p["fritz"] = carry_mesh(p.get("fritz"), nuovo, time.time())
             p["fritz"]["ts"] = time.time()
             if p["fritz"].get("ok"):
                 with viewer_tz(owner_tz(key)):          # «Collegato alle …» nel fuso del proprietario
@@ -8341,7 +8390,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261027-161500") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261027-171500") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -8942,6 +8991,51 @@ body.nav-open .navveil{display:block}
 #page-net:not(.view-fritzbox) #fritz-note,
 #page-net.view-eventi #probes,
 #page-net:not(.view-eventi) #events-card{display:none}
+
+/* Dispositivi in rete (elenco del FRITZ!Box) */
+section.netdev{padding:14px 16px}
+.nd-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.nd-head h2{margin:0;font-size:1.05rem} .nd-head .sub{color:var(--muted);font-size:.86rem} .nd-head .sp{flex:1}
+.nd-head input[type=search]{font:inherit;font-size:.86rem;border:1px solid var(--line);border-radius:99px;padding:5px 12px;
+  width:200px;background:var(--panel);color:var(--ink)}
+.nd-chips{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
+.nd-chips button{font:inherit;font-size:.82rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:99px;padding:3px 11px;cursor:pointer}
+.nd-chips button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.nd-chips button.w{color:var(--warn)} .nd-chips button.w[aria-pressed=true]{color:#fff}
+section.netdev table{width:100%;border-collapse:collapse;font-size:.9rem;margin-top:6px}
+section.netdev th{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;text-align:left;
+  font-weight:600;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+section.netdev td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}
+section.netdev tbody tr:last-child td{border-bottom:0}
+section.netdev .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+section.netdev .nm b{font-weight:600} section.netdev .nm small,section.netdev .via small{display:block;color:var(--muted);font-size:.76rem}
+section.netdev .mono{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+section.netdev .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ok)}
+section.netdev .dot.off{background:color-mix(in srgb,var(--muted) 45%,transparent)}
+section.netdev .via{white-space:nowrap}
+.nd-sig{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:-2px;margin-right:6px}
+.nd-sig i{width:4px;background:var(--line);border-radius:1px} .nd-sig i.on{background:var(--ok)}
+section.netdev tr.weak .nd-sig i.on{background:var(--warn)} section.netdev tr.weak .dbm{color:var(--warn);font-weight:600}
+section.netdev .mon{white-space:nowrap;font-size:.84rem} section.netdev .mon .yes{color:var(--ok)}
+section.netdev .mon button{font:inherit;font-size:.8rem;border:1px solid var(--line);background:var(--panel);color:var(--accent);
+  border-radius:99px;padding:2px 10px;cursor:pointer}
+section.netdev tr.offrow td{color:var(--muted)} section.netdev tr.offrow .nm b{font-weight:500}
+section.netdev td.empty{color:var(--muted);text-align:center;padding:16px}
+.nd-foot{color:var(--muted);font-size:.8rem;margin:10px 0 0;display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center}
+.nd-foot label{display:inline-flex;flex-direction:row;gap:6px;align-items:center;color:var(--ink);margin:0;white-space:nowrap;width:auto}
+.nd-foot label input{width:auto;margin:0}
+@media (max-width:700px){
+  section.netdev thead{display:none}
+  section.netdev table,section.netdev tbody,section.netdev td{display:block}
+  section.netdev tbody tr{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:2px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  section.netdev td{border:0;padding:0}
+  section.netdev td.st{grid-row:1 / 3;align-self:center} section.netdev td.nm{grid-column:2} section.netdev td.mon{grid-column:3;grid-row:1}
+  section.netdev td.ip{grid-column:2;grid-row:2} section.netdev td.via{grid-column:2;white-space:normal}
+  section.netdev td.sg{grid-column:3;grid-row:2;text-align:right} section.netdev td.num{grid-column:3;grid-row:3}
+  section.netdev td.empty{grid-column:1 / -1}
+  .nd-head input[type=search]{width:100%}
+}
 
 /* Scheda Stato sonda */
 .pi-group{padding:12px 18px 6px;font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;
@@ -10779,6 +10873,7 @@ const FRITZ_FIELDS = [
   { key: "guests", label: "Client sulla rete ospiti" },
   { key: "mesh",   label: "Rete mesh (repeater e dispositivi)" },
   { key: "fiber",  label: "Stato della fibra" },
+  { key: "netdev", label: "Dispositivi in rete (elenco del FRITZ!Box)" },
   { key: "model",  label: "Modello e versione FRITZ!OS" },
   { key: "probe",  label: "Nome sonda", off: true },
 ];
@@ -11194,6 +11289,11 @@ function render(d) {
         items.push(f);
       }
     }
+    if (showFritz("netdev") && p.fritz && Array.isArray(p.fritz.netdev)) {
+      const nd = netdevSection(p);
+      nd.dataset.lid = "fritz:" + p.name + "|dispositivi";
+      items.push(nd);
+    }
   }
   // ordine delle sezioni salvato nell'account; le sezioni nuove vanno in fondo
   const pos = id => { const i = layout.indexOf(id); return i < 0 ? 1e6 : i; };
@@ -11207,6 +11307,130 @@ function render(d) {
   fritzNote();
   applyDevFilter();
   renderEvents();
+}
+
+// ---- Dispositivi in rete: l'elenco del FRITZ!Box (letto dalla sonda ogni 5 minuti) con cavo o Wi-Fi,
+// segnale e velocità del collegamento; «+ Monitora» apre la finestra Dispositivi con la riga pronta.
+// Filtro, ricerca e «non collegati» restano mentre la pagina si aggiorna da sola.
+const ndState = new Map();                 // sonda -> { filter, q, off }
+const ND_WEAK = -75;                       // dBm: stessa soglia degli avvisi della mesh
+function ndMonitored(p, d) {
+  const cfg = (p.config && p.config.devices) || {}, nm = (d.name || "").toLowerCase();
+  return Object.entries(cfg).some(([n, h]) => {
+    const host = String(h).toLowerCase();
+    return (d.ip && host === d.ip.toLowerCase()) || (nm && (n.toLowerCase() === nm || host === nm
+           || host === nm + ".fritz.box" || host === nm + ".local"));
+  });
+}
+function ndSeen(ts) {
+  const m = Math.round((Date.now() / 1000 - ts) / 60);
+  if (m < 60) return m < 1 ? "visto adesso" : `visto ${m} min fa`;
+  if (m < 24 * 60) return Math.round(m / 60) === 1 ? "visto un'ora fa" : `visto ${Math.round(m / 60)} ore fa`;
+  return "visto il " + dayTime(ts);
+}
+function ndBars(sig) {
+  const n = sig == null ? 0 : sig > -55 ? 4 : sig > -65 ? 3 : sig > ND_WEAK ? 2 : 1, box = el("span", "nd-sig");
+  [5, 8, 11, 14].forEach((h, i) => { const b = el("i", i < n ? "on" : ""); b.style.height = h + "px"; box.append(b); });
+  return box;
+}
+function ndMonitor(p, d) {
+  if (!p.config) { alert("La sonda non ha ancora inviato la sua configurazione: riprova tra poco."); return; }
+  const name = (d.name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9 _.-]+/g, "-")
+    .replace(/^[^A-Za-z0-9]+/, "").slice(0, 40) || "dispositivo";
+  openDevices(p);
+  const row = devRow(name, d.ip || "");
+  syncDevAdd();
+  row.querySelector("input").focus();
+}
+function netdevSection(p) {
+  const all = p.fritz.netdev || [], st = ndState.get(p.name) || { filter: "all", q: "", off: false };
+  ndState.set(p.name, st);
+  const on = all.filter(d => d.on), weak = d => d.via === "wifi" && d.signal != null && d.signal <= ND_WEAK;
+  const sec = el("section", "netdev");
+  const head = el("div", "nd-head");
+  head.append(el("h2", "", "Dispositivi in rete"), el("span", "src", "sonda " + (p.label || p.name)));
+  const quando = p.fritz.netdev_ts ? Math.max(0, Math.round((Date.now() / 1000 - p.fritz.netdev_ts) / 60)) : null;
+  head.append(el("span", "sub", on.length === 1 ? "1 collegato ora" : `${on.length} collegati ora`));
+  head.append(el("span", "sp"));
+  const q = el("input"); q.type = "search"; q.placeholder = "Cerca nome o IP"; q.value = st.q;
+  q.setAttribute("aria-label", "Cerca nome o IP");
+  head.append(q);
+  const filters = [["all", "Tutti", on.length], ["wifi", "Wi-Fi", on.filter(d => d.via === "wifi").length],
+                   ["lan", "Cavo", on.filter(d => d.via === "lan").length], ["weak", "Segnale debole", on.filter(weak).length],
+                   ["nomon", "Non monitorati", on.filter(d => !ndMonitored(p, d)).length]];
+  const chips = el("div", "nd-chips");
+  filters.forEach(([k, t, n]) => {
+    if (k === "weak" && !n && st.filter !== "weak") return;            // nessun segnale debole: niente filtro
+    const b = el("button", k === "weak" ? "w" : ""); b.type = "button";
+    b.append(t + " ", el("b", "", String(n)));
+    b.setAttribute("aria-pressed", String(st.filter === k));
+    b.onclick = () => { st.filter = k; sec.replaceWith(netdevSection(p)); };
+    chips.append(b);
+  });
+  const table = el("table"), thead = el("thead"), tr0 = el("tr");
+  ["", "Nome", "IP", "Collegamento", "Segnale", "Velocità", "Ping"].forEach((t, i) => {
+    const th = el("th", i === 5 ? "num" : "", t); tr0.append(th);
+  });
+  thead.append(tr0);
+  const tbody = el("tbody");
+  const fill = () => {
+    tbody.innerHTML = "";
+    const needle = st.q.trim().toLowerCase();
+    const rows = all.filter(d => (st.off || d.on)
+      && (st.filter === "all" || (st.filter === "wifi" && d.via === "wifi") || (st.filter === "lan" && d.via === "lan")
+          || (st.filter === "weak" && weak(d)) || (st.filter === "nomon" && !ndMonitored(p, d)))
+      && (!needle || (d.name || "").toLowerCase().includes(needle) || (d.ip || "").includes(needle)));
+    rows.forEach(d => {
+      const tr = el("tr", (d.on ? "" : "offrow") + (weak(d) ? " weak" : ""));
+      tr.append(el("td", "st"));
+      tr.lastChild.append(el("span", "dot" + (d.on ? "" : " off")));
+      const nm = el("td", "nm"); nm.append(noTr(el("b", "", d.name || "senza nome")));
+      if (d.model || d.guest) {
+        const sub = el("small");
+        if (d.model) sub.append(noTr(el("span", "", d.model)));
+        if (d.guest) sub.append(d.model ? " · " : "", el("span", "", "rete ospiti"));
+        nm.append(sub);
+      }
+      tr.append(nm, el("td", "ip mono", d.ip || "—"));
+      const via = el("td", "via");
+      if (!d.on) {
+        via.colSpan = 3; via.append("non collegato");
+        if (d.seen) via.append(el("small", "", ndSeen(d.seen)));
+        tr.append(via);
+      } else {
+        via.append(d.via === "lan" ? "Cavo" : d.via === "wifi" ? "Wi-Fi " + (d.band || "") : "—");
+        const det = d.via === "lan" ? [d.port ? "LAN " + d.port : "", d.node || ""].filter(Boolean).join(" · ")
+                  : d.node ? "via " + d.node : "";
+        if (det) via.append(noTr(el("small", "", det)));
+        const sg = el("td", "sg");
+        if (d.signal == null) sg.append(el("span", "mono", "—"));
+        else { sg.append(ndBars(d.signal), el("span", "dbm", d.signal + " dBm")); }
+        tr.append(via, sg, el("td", "num", d.rate != null ? d.rate + " Mbit/s" : "—"));
+      }
+      const mon = el("td", "mon");
+      if (ndMonitored(p, d)) mon.append(el("span", "yes", "✓ monitorato"));
+      else if (d.ip) { const b = el("button", "", "+ Monitora"); b.type = "button"; b.onclick = () => ndMonitor(p, d); mon.append(b); }
+      tr.append(mon);
+      tbody.append(tr);
+    });
+    if (!rows.length) {
+      const tr = el("tr"), td = el("td", "empty", needle ? "Nessun dispositivo con questo nome o IP." : "Nessun dispositivo in questo elenco.");
+      td.colSpan = 7; tr.append(td); tbody.append(tr);
+    }
+  };
+  fill();
+  q.oninput = () => { st.q = q.value; fill(); };
+  table.append(thead, tbody);
+  const foot = el("div", "nd-foot"), lab = el("label"), cb = el("input");
+  cb.type = "checkbox"; cb.checked = st.off;
+  cb.onchange = () => { st.off = cb.checked; fill(); };
+  lab.append(cb, ` Mostra anche i non collegati (${all.length - on.length})`);
+  const note = el("span");
+  note.append(el("span", "", quando == null ? "Dal FRITZ!Box." : quando < 1 ? "Dal FRITZ!Box, aggiornato ora." : `Dal FRITZ!Box, aggiornato ${quando} min fa.`),
+              " ", el("span", "", "La velocità è quella del collegamento, non il traffico."));
+  foot.append(lab, note);
+  sec.append(head, chips, table, foot);
+  return sec;
 }
 
 // ---- Dashboard: riepilogo, grafici dei ping e uso della linea (FRITZ!Box). Cosa mostrare
@@ -12669,11 +12893,11 @@ function setReorder(on) {
 $("#reorder-cancel").onclick = () => { setReorder(false); refresh(); };
 
 // ---- ordine delle sezioni (ping di ogni sonda e riquadri FRITZ!Box) ----
-function sectionName(sec) { return (sec.querySelector(".probe-head h2")?.textContent || "sezione")
+function sectionName(sec) { return (sec.querySelector(".probe-head h2, .nd-head h2")?.textContent || "sezione")
   + (sec.dataset.lid.startsWith("fritz:") ? " (" + (sec.querySelector(".probe-head .src")?.textContent || sec.dataset.lid.slice(6)) + ")" : ""); }
 
 function addSectionMove(sec) {
-  const head = sec.querySelector(".probe-head");
+  const head = sec.querySelector(".probe-head, .nd-head");     // .nd-head: Dispositivi in rete
   const box = el("span", "smove");
   const up = el("button", "", "▲"), down = el("button", "", "▼");
   up.type = down.type = "button";

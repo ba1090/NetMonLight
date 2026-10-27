@@ -3,7 +3,7 @@ francese). Stesso formato di TRANSLATIONS in i18n.py: chiave il testo italiano, 
 Stanno a parte perché la pagina utente non le carica (sono solo per il pannello e i suoi avvisi).
 Per i testi nuovi: python3 tools/i18n-estrai.py admin --mancanti
 """
-__version__ = "1.1.20261027-161500"
+__version__ = "1.1.20261027-171500"
 
 ADMIN_TRANSLATIONS = {
     "en": {
