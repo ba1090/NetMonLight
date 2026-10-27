@@ -13,7 +13,7 @@ senza esserne avvisati.
 
 Nessuna dipendenza esterna: si può testare da sola.
 """
-__version__ = "1.1.20261026-104239"
+__version__ = "1.1.20261027-171500"
 import time
 from dataclasses import dataclass
 

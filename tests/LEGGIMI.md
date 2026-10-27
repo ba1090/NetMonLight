@@ -20,7 +20,6 @@ python tests/stress/stress.py sustained --seconds 7200 --out /tmp/netmon-stress 
 | `security/test_xss_browser.py` | Chromium headless: testi avvelenati in ogni campo che arriva dalla rete (nomi, SSID, mesh, ospiti, servizi trovati) non vengono mai eseguiti, né nella pagina utente né nel pannello |
 | `security/test_probe.py` | sonda: niente opzioni o comandi nel ping, configurazione dal server ricontrollata, scansione solo della rete di casa, server e sonda d'accordo sugli indirizzi; pagina locale (password, DNS rebinding, CSRF, forza bruta) |
 | `security/test_ssrf.py` | gli indirizzi ntfy scelti dagli utenti non portano il server sulla rete interna |
-| `security/test_multivm.py` | gateway + orchestratore + 2 VM: token e cookie non passano da una VM all'altra, intestazioni interne ignorate |
 | `security/test_resources.py` | ogni richiesta chiude le sue connessioni al database |
 | `test_managed.py` | sonda gestita da un altro sistema (`NETMON_MANAGED_BY`): dice dove fare riavvio, aggiornamenti e reti Wi-Fi invece di consigliare sudo; il server non le manda comandi (pagina, programmati, automatici) e la segna nel pannello |
 | `scenarios/test_usecases.py` | dall'account con 0 sonde a quello con 50 sonde, 1000 dispositivi e 10 FRITZ!Box; piani basso/medio/alto |

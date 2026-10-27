@@ -35,7 +35,7 @@ class LiveServer:
         self.base = f"http://127.0.0.1:{self.port}"
         self.api_token = "chiave-" + secrets.token_urlsafe(16)
         self.env = {**os.environ, "API_TOKEN": self.api_token, "DATA_DIR": str(self.data), "COOKIE_SECURE": "0",
-                    "VM_ID": "", "ROLE": "", "GATEWAY_SECRET": "", "SMTP_HOST": "", "TELEGRAM_BOT_TOKEN": "",
+                    "SMTP_HOST": "", "TELEGRAM_BOT_TOKEN": "",
                     "MIN_FREE_MB": "1", "SCRYPT_SLOTS": "3", "MALLOC_ARENA_MAX": "2", "NEW_USER_PLAN": "basso",
                     "PUBLIC_URL": self.base, **(env or {})}
         self.log_path = Path(log_path or self.data.parent / f"{self.data.name}.log")

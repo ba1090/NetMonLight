@@ -1,6 +1,7 @@
-# netmon 1.1.20261026-104239 — installazione e aggiornamento
+# NetMon Light 1.1.20261027-171500 — installazione e aggiornamento
 
-Istruzioni rapide per la VM (server) e la sonda (es. Raspberry Pi). I dettagli e la risoluzione
+Istruzioni rapide per la VM (una sola: pagina di stato, pannello di amministrazione, utenti e sonde)
+e per la sonda (es. Raspberry Pi). Per una installazione nuova vai al **Caso 3**. I dettagli e la risoluzione
 dei problemi sono in `GUIDA.md`; le novità di ogni versione in `CHANGELOG.md`.
 
 > **Ordine obbligatorio: prima la VM, poi le sonde.** Le sonde prendono il pacchetto (e, alla
@@ -11,7 +12,6 @@ dei problemi sono in `GUIDA.md`; le novità di ogni versione in `CHANGELOG.md`.
 ## Caso 1 · Aggiornamento normale, dal browser
 
 Vale se VM e sonde hanno già una 1.0 e sono state aggiornate almeno una volta a mano (Caso 2).
-Con più VM dietro un gateway, il pannello è quello del gateway (vedi Caso 4).
 Lo zip si carica **solo sulla VM**: le sonde lo ricevono da lì, firmato dalla tua VM.
 
 > **Dalla 1.1 ogni pacchetto va firmato da te** con *Firma NetMon*: sul Mac l'app in `tools/mac`
@@ -32,14 +32,10 @@ Lo zip si carica **solo sulla VM**: le sonde lo ricevono da lì, firmato dalla t
    compare una nota.
 3. Scegli **Installazione sulla VM** (*Adesso* o *Data e ora*) e **Dopo, aggiorna le sonde**
    (*Nessuna*, che è la scelta proposta, *Tutte* o *Quelle che scelgo*), metti la tua password e
-   premi **Installa**. Con più VM, se in alto hai scelto il gateway, il pacchetto va anche alle VM:
-   l'elenco dopo il controllo dice quali sono **da aggiornare** e quali hanno **già** quella versione
-   (non vengono toccate, come per le sonde). Va prima sulle VM e per ultimo sul gateway; se il gateway
-   è già aggiornato, si aggiornano solo le VM rimaste indietro. Il server si riavvia per qualche secondo; se non riparte, viene rimessa da
-   solo la versione precedente.
+   premi **Installa**. Il server si riavvia per qualche secondo; se non riparte, viene rimessa da
+   sola la versione precedente.
 4. **Finestra di rollback (4 ore).** In fondo alla sezione compare il conto alla rovescia:
-   - **Conferma la nuova versione** quando hai controllato che va tutto bene (dal gateway conferma
-     anche le VM aggiornate con lui: il riquadro le elenca);
+   - **Conferma la nuova versione** quando hai controllato che va tutto bene;
    - **Rollback subito** per tornare alla versione precedente;
    - senza conferma, allo scadere delle 4 ore la VM **torna da sola** alla versione precedente
      (anche se nel frattempo è stata riavviata).
@@ -75,7 +71,7 @@ da una 1.x, oppure se il pannello non funziona. Prima la VM, poi ogni sonda.
 
 3. Alla fine controlla:
    - la riga **«Impronta della chiave degli aggiornamenti: xxxx xxxx xxxx xxxx»** — annotala;
-   - `Aggiornamento completato: versione <quella che avevi> → 1.1.20261026-104239`.
+   - `Aggiornamento completato: versione <quella che avevi> → 1.1.20261027-171500`.
 4. Ricarica la pagina di stato nel browser.
 
 Account, storico, sonde e chiave del server restano. Un aggiornamento a mano chiude l'eventuale
@@ -175,54 +171,20 @@ Raspberry Pi OS Lite (o Debian/Ubuntu), collegata alla rete di casa, meglio via 
 Si installa con il server (`server/privacy.html`): il link *Informativa sulla privacy* è in fondo a ogni pagina.
 Dettagli in GUIDA.md, *Privacy e GDPR*.
 
-## Caso 4 · Più VM dietro un gateway
+## Caso 4 · Arrivare da NetMon con più VM (gateway)
 
-Un gateway (es. `netmonhome.net`) con il pannello di amministrazione, e più VM probe ognuna con il
-suo indirizzo (`vm1.netmonhome.net`, …) e i suoi utenti. Dettagli in `gateway/LEGGIMI.md`.
+NetMon Light è una sola VM: niente gateway, niente orchestratore, niente VM probe. Per portare qui gli
+utenti di un'installazione NetMon con più VM:
 
-### 1. Gateway
-
-DNS: `netmonhome.net` verso l'IP pubblico del gateway; porte 80 e 443 aperte. Carica lo zip nella home:
-
-```bash
-cd ~ && sudo apt install -y unzip && rm -rf ~/netmon && unzip -q netmon-<versione>.zip
-sudo bash ~/netmon/server/installa-server.sh --orchestratore
-```
-
-Alla fine accedi a `https://netmonhome.net/admin` con l'amministratore creato dallo script.
-
-### 2. Ogni VM probe
-
-1. DNS: record A `vm1.netmonhome.net` (poi `vm2`, …) verso l'IP pubblico della VM; porte 80 e 443
-   aperte (Google Cloud: *Consenti traffico HTTP e HTTPS*). Gateway e VM nella stessa rete privata.
-2. Pannello del gateway → **Server › Tutte le VM › Collega una VM**: scrivi il nome (`vm1`) e la tua
-   password, premi **Genera il token** (vale 24 ore, una volta sola).
-3. Carica lo zip nella home della VM, poi:
-
-   ```bash
-   cd ~ && sudo apt install -y unzip && rm -rf ~/netmon && unzip -q netmon-<versione>.zip
-   sudo bash ~/netmon/server/installa-server.sh --dietro-gateway
-   ```
-
-   Chiede l'indirizzo del gateway (solo `https://`: la risposta contiene la chiave della VM), il token
-   e l'indirizzo pubblico della VM (proposto `vm1.netmonhome.net`). Il nome della VM arriva dal token.
-4. In *Tutte le VM* la VM compare **attiva** entro un minuto. Ora puoi creare utenti su di lei
-   (*Amministrazione › Utenti*, scegliendo la VM), importarne uno (*Importa un utente*) o spostarne uno
-   da un'altra VM (*Azioni ▾ › Sposta su un'altra VM*: controlla prima lo spazio libero e porta sonde e
-   storico; le sonde aggiornate passano alla VM nuova da sole).
-
-### 3. Aggiornamenti
-
-Dal pannello del gateway, Caso 1 scegliendo in alto il gateway: il pacchetto va anche a tutte le VM con una versione più vecchia
-(togli la spunta a quelle da non aggiornare adesso).
-A mano: `installa-server.sh --aggiorna` su ogni VM e per ultimo sul gateway.
-
-### 4. Cambiare dominio
-
-Nuovi record DNS accanto ai vecchi, poi `installa-server.sh --orchestratore` sul gateway (**2) Riconfigurare**,
-nuovo dominio) e `installa-server.sh --dietro-gateway` su ogni VM, con un token nuovo e il nuovo indirizzo. I
-vecchi nomi restano attivi e rimandano sonde e browser al nuovo (`OLD_HOSTS` nel `.env`). Dettagli in
-`GUIDA.md`, capitolo 11.
+1. Installa NetMon Light su una VM nuova (Caso 3) e crea l'amministratore.
+2. Nel pannello del vecchio gateway, per ogni utente: **Azioni ▾ › Esporta (file cifrato)**, con una
+   password del file.
+3. Nel pannello di NetMon Light: **Utenti › ⤒ Importa un utente**, scegli il file, scrivi la sua password e
+   premi *Carica e controlla*, poi *Importa*. L'utente entra con la sua password, le sonde tengono il loro token.
+4. Le sonde scrivono ancora al vecchio indirizzo (`vmN.…`): sulla sonda cambia l'indirizzo del server
+   (`sudo bash ~/probe/installa-sonda.sh`, opzione 2) in `https://TUO-DOMINIO/api/report`, oppure fai
+   puntare il vecchio nome DNS a questa VM e aggiungilo a `OLD_HOSTS` nel `.env` (vedi `GUIDA.md`,
+   *Cambiare dominio*): le sonde ricevono il nuovo indirizzo da sole.
 
 ---
 
@@ -230,9 +192,9 @@ vecchi nomi restano attivi e rimandano sonde e browser al nuovo (`OLD_HOSTS` nel
 
 | Controllo | Cosa devi vedere |
 |---|---|
-| `https://TUO-DOMINIO/health` | `{"ok":true,"version":"1.1.20261026-104239",...}` |
+| `https://TUO-DOMINIO/health` | `{"ok":true,"version":"1.1.20261027-171500",...}` |
 | Pagina di stato | la sonda compare in *Stato rete › Monitor dispositivi* entro un minuto, pallino verde |
-| *Stato sonda* → versione | `1.1.20261026-104239`, senza scritta gialla |
+| *Stato sonda* → versione | `1.1.20261027-171500`, senza scritta gialla |
 | `http://IP_DELLA_SONDA:8080` | il browser chiede la password; a sinistra il menu delle sezioni; in *Server* il token appare come `••••••••`, **Mostra** lo rivela |
 | Alert di prova | aggiungi un dispositivo inesistente (es. `test: 192.168.1.254`): dopo circa 3 minuti arriva l'avviso; poi rimuovilo |
 | Sulla sonda | `ls /usr/local/share/netmon/update-key.pub` esiste |

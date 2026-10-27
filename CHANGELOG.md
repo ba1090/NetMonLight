@@ -7,6 +7,33 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
+## 27 ottobre 2026 (1.1.20261027-171500 · 2 versioni) — NetMon Light
+
+- **Dispositivi in rete** (da NetMon 1.1.20261027-160153): nella pagina *Stato rete › FRITZ!Box*, sotto i
+  riquadri, l'elenco dei dispositivi che il FRITZ!Box conosce, con nome, IP, collegamento (cavo con porta LAN, o
+  Wi-Fi con banda e repeater), segnale in dBm con le tacche e velocità del collegamento (non il traffico, che il
+  FRITZ!Box non dà per dispositivo). Filtri Wi-Fi, Cavo, Segnale debole (sotto −75 dBm) e Non monitorati, ricerca
+  per nome o IP e casella per mostrare anche i non collegati con «visto … fa». **+ Monitora** apre *Dispositivi*
+  della sonda con nome e IP già compilati. Sul telefono le righe diventano schede. Si aggiorna ogni 5 minuti con la
+  mappa mesh; si nasconde da *Visualizzazione → Riquadro FRITZ!Box → Dispositivi in rete*. Gli indirizzi MAC
+  restano sulla sonda: al server arrivano solo nome, IP e collegamento. Tradotto in inglese, tedesco e francese.
+  *Sonda, pagina utente, server.*
+- **NetMon Light: una sola VM per tutto.** Pagina di stato degli utenti, pannello di amministrazione (admin e
+  utenti) e sonde dei vari utenti stanno sulla stessa VM. Tolti il gateway (`gateway/`, pagina d'accesso
+  comune e smistamento), l'orchestratore (`ROLE=orchestratore`) e le VM probe (`VM_ID`, `GATEWAY_SECRET`,
+  `GATEWAY_URL`): niente più rotte `/internal/*`, `/api/vm/*`, `/api/admin/vms*`, `/api/admin/probes/all`,
+  `/api/admin/schedules/all` né inoltro del pannello alle VM (`X-Netmon-VM`). *Server.*
+- **Pannello senza parti per più VM**: via *Server › Tutte le VM* (mappa, elenco, *Collega una VM*), la barra
+  delle macchine, la colonna *VM* in utenti, utenti non attivi e sonde, la scelta della VM per inviti e
+  importazioni, *Sposta su un'altra VM* e l'installazione del pacchetto a cascata sulle VM. Restano
+  *Esporta (file cifrato)* e *Importa un utente*, anche per portare utenti da un'installazione NetMon con
+  gateway. Invio email, conservazione dei dati ed email di prova valgono per il server. *Pannello.*
+- **Installazione**: `installa-server.sh` ha solo l'installazione guidata e `--aggiorna` (tolti
+  `--orchestratore` e `--dietro-gateway`); `env.example` senza le variabili delle più VM. *Server.*
+- **Documenti**: README, INSTALLAZIONE (Caso 4: arrivare da NetMon con più VM) e GUIDA (nuove sezioni
+  *Esportare e importare un utente* e *Cambiare dominio*; tolto il capitolo sulle più VM); informativa sulla
+  privacy con un solo server. *Documenti, informativa.*
+
 ## 26 ottobre 2026 (1.1.20261026-104239 · 3 versioni)
 
 - **Trasferimento degli utenti cifrato con una password**: *Utenti → Esporta (file cifrato)* chiede una password

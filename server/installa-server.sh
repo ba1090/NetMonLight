@@ -4,16 +4,13 @@
 # Uso, dalla VM, nella cartella dove hai estratto netmon.zip:
 #   sudo bash netmon/server/installa-server.sh              installazione o riconfigurazione
 #   sudo bash netmon/server/installa-server.sh --aggiorna   solo aggiornamento dei file
-#   sudo bash netmon/server/installa-server.sh --orchestratore   gateway: pannello di amministrazione
-#        di tutte le VM e indirizzo pubblico (installa anche il gateway, nella stessa macchina)
-#   sudo bash netmon/server/installa-server.sh --dietro-gateway  VM probe: chiede indirizzo del
-#        gateway e token della VM (generato nel pannello), si collega e riceve le impostazioni.
-#        Su una VM già installata la ricollega al gateway: utenti, sonde e dati restano.
+#
+# NetMon Light: una sola VM con pagina di stato, pannello di amministrazione, utenti e sonde.
 #
 # Verifica il sistema, installa i pacchetti, chiede le informazioni necessarie (dominio,
 # notifiche), prova email/Telegram/ntfy, configura HTTPS e alla fine mostra le informazioni
 # da conservare. Si può rilanciare quando si vuole: configurazione, account e storico restano.
-NETMON_VERSION="1.1.20261026-104239"
+NETMON_VERSION="1.1.20261027-171500"
 
 set -uo pipefail
 
@@ -73,15 +70,11 @@ FILES=(app.py auth.py account.py mfa.py monitor.py notifier.py vmops.py brand.py
 SUMMARY=/root/netmon-server-riepilogo.txt
 
 MODE=install
-# VM dietro il gateway: HTTPS lo fa il gateway, qui niente Caddy e niente certificato.
-# Orchestratore: il gateway con il pannello di tutte le VM (niente utenti né sonde).
-BEHIND_GW=0; ORCH=0
 case "${1-}" in
   --aggiorna) MODE=update ;;
-  --dietro-gateway|--unisci) BEHIND_GW=1 ;;
-  --orchestratore) ORCH=1 ;;
+  "") ;;
+  *) printf '\n  Opzione sconosciuta: %s (NetMon Light ha solo --aggiorna).\n\n' "$1"; exit 1 ;;
 esac
-GW_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../gateway" 2>/dev/null && pwd || true)
 
 printf '\n%snetmon · installazione guidata del server · versione %s%s\n' "$B" "$NETMON_VERSION" "$N"
 OLD_VERSION=$(grep -o '__version__ = "[^"]*"' /opt/netmon/app.py 2>/dev/null | cut -d'"' -f2)
@@ -110,129 +103,7 @@ ok "File del server presenti"
 free_mb=$(df -Pm / | awk 'NR==2 {print $4}')
 [ "${free_mb:-0}" -ge 500 ] && ok "Spazio libero: ${free_mb} MB" || warn "Poco spazio libero su disco (${free_mb} MB): ne servono almeno 500."
 
-# ------------------------------------------------------------------ collegamento al gateway (VM probe)
 envget() { [ -f "$DEST/.env" ] && sed -n "s/^$1=//p" "$DEST/.env" | tail -n1; }
-[ "$ORCH" = 1 ] && { [ -f "$GW_DIR/gateway.py" ] || die "Manca la cartella gateway/ accanto a server/: scarica di nuovo netmon."; }
-gw_join() {
-  echo
-  info "La VM si collega al gateway con il token generato nel pannello di amministrazione"
-  info "(Server › Tutte le VM › Collega una VM). Il token vale una volta sola."
-  local gw tok priv name old gwhost cur dnsip pubip oldgw
-  old=$(envget GATEWAY_URL); [ -n "$old" ] || old=$(envget PUBLIC_URL)
-  while :; do
-    ask "Indirizzo del gateway (es. netmonhome.net)" "${old#https://}"; gw=${REPLY%/}
-    gw=${gw#https://}; [[ "$gw" == http://* ]] && { warn "Serve https: la risposta del gateway contiene la chiave della VM."; continue; }
-    gw="https://$gw"
-    [[ "$gw" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] && break
-    warn "Indirizzo non valido."
-  done
-  while :; do
-    ask "Token della VM (nmvm_…)" ""; tok=$REPLY
-    [[ "$tok" =~ ^nmvm_[a-z0-9]{1,16}\.[A-Za-z0-9_-]+$ ]] && break
-    warn "Il token comincia con nmvm_ seguito dal nome della VM: copialo intero dal pannello."
-  done
-  name=${tok#nmvm_}; name=${name%%.*}
-  old=$(envget VM_ID)
-  [ -z "$old" ] || [ "$old" = "$name" ] || die "Questa VM è $old, ma il token è per $name: genera nel pannello un token con il nome $old."
-  priv=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i+1); exit}}')
-  ask "IP privato di questa VM (rete del gateway)" "$priv"; priv=$REPLY
-  # indirizzo pubblico della VM: sonde e utenti arrivano qui direttamente (il gateway li indirizza)
-  gwhost=${gw#*://}; gwhost=${gwhost%%:*}
-  cur=$(envget PUBLIC_URL); cur=${cur#https://}; cur=${cur#http://}; cur=${cur%%/*}
-  # dominio del gateway cambiato: si propone lo stesso nome della VM sul dominio nuovo
-  oldgw=$(envget GATEWAY_URL); oldgw=${oldgw#https://}; oldgw=${oldgw%%[:/]*}
-  [ -n "$oldgw" ] && [ "$oldgw" != "$gwhost" ] && [[ "$cur" == *".$oldgw" ]] && cur="${cur%."$oldgw"}.$gwhost"
-  { [ -n "$cur" ] && [ "$cur" != "$gwhost" ]; } || cur="$name.$gwhost"
-  echo
-  info "Sonde e utenti di questa VM arrivano al suo indirizzo pubblico: crea nel DNS un record A"
-  info "con questo nome verso l'IP pubblico della VM, e apri le porte 80 e 443."
-  pubip=$(curl -fsS --max-time 2 -H "Metadata-Flavor: Google" \
-    http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip 2>/dev/null || true)
-  [[ "$pubip" =~ ^[0-9.]+$ ]] || pubip=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
-  while :; do
-    ask "Indirizzo pubblico di questa VM" "$cur"
-    VM_DOMAIN=${REPLY,,}; VM_DOMAIN=${VM_DOMAIN#https://}; VM_DOMAIN=${VM_DOMAIN#http://}; VM_DOMAIN=${VM_DOMAIN%%/*}
-    [[ "$VM_DOMAIN" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]] || { warn "Non sembra un dominio valido (es. $name.$gwhost)."; continue; }
-    [ "$VM_DOMAIN" != "$gwhost" ] || { warn "Serve un nome diverso da quello del gateway (es. $name.$gwhost)."; continue; }
-    dnsip=$(getent ahostsv4 "$VM_DOMAIN" 2>/dev/null | awk '{print $1; exit}')
-    if [ -n "$pubip" ] && [ "$dnsip" = "$pubip" ]; then ok "$VM_DOMAIN punta a $pubip"; break; fi
-    warn "$VM_DOMAIN punta a ${dnsip:-nessun indirizzo}, ma la VM ha IP ${pubip:-sconosciuto}."
-    yes_no "Usarlo comunque (HTTPS partirà quando il DNS sarà giusto)" n && break
-  done
-  OLD_HOSTS=$(old_hosts_for "$VM_DOMAIN")
-  JOIN=$(GW="$gw" TOK="$tok" URL="http://$priv:8000" PUB="https://$VM_DOMAIN" python3 - <<'PYEOF'
-import json, os, shlex, urllib.error, urllib.request
-req = urllib.request.Request(os.environ["GW"] + "/api/vm/join", method="POST",
-                             data=json.dumps({"token": os.environ["TOK"], "url": os.environ["URL"],
-                                               "public": os.environ["PUB"]}).encode(),
-                             headers={"Content-Type": "application/json"})
-try:
-    d = json.loads(urllib.request.urlopen(req, timeout=20).read())
-except urllib.error.HTTPError as e:
-    try:
-        msg = json.loads(e.read()).get("detail")
-    except Exception:
-        msg = None
-    print("JOIN_ERR=" + shlex.quote(str(msg or f"errore {e.code}")))
-    raise SystemExit
-except Exception as e:
-    print("JOIN_ERR=" + shlex.quote(f"gateway non raggiungibile ({e})"))
-    raise SystemExit
-# La risposta finisce in un eval come root e nel .env: solo le chiavi attese, valori controllati
-import re
-def bad(msg):
-    print("JOIN_ERR=" + shlex.quote("risposta del gateway non valida (" + msg + ")"))
-    raise SystemExit
-out = {"J_VM_ID": d.get("vm_id"), "J_KEY": d.get("key"), "J_GW_IP": d.get("gateway_ip") or "", "J_PUBLIC_URL": d.get("public_url")}
-if not re.fullmatch(r"[a-z0-9]{1,16}", str(out["J_VM_ID"])): bad("nome della VM")
-if not re.fullmatch(r"[A-Za-z0-9_-]{20,100}", str(out["J_KEY"])): bad("chiave")
-if not re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}|", str(out["J_GW_IP"])): bad("IP del gateway")
-if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d+)?", str(out["J_PUBLIC_URL"])): bad("indirizzo del gateway")
-ALLOWED = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "TELEGRAM_BOT_TOKEN")
-for k, v in (d.get("settings") or {}).items():
-    if k in ALLOWED and isinstance(v, (str, int)) and not re.search(r"[\x00-\x1f\x7f]", str(v)):
-        out["J_" + k] = v
-for k, v in out.items():
-    print(f"{k}={shlex.quote(str(v))}")
-PYEOF
-)
-  JOIN_ERR=; eval "$JOIN"
-  [ -z "$JOIN_ERR" ] || die "Collegamento al gateway non riuscito: $JOIN_ERR"
-  [[ "${J_GW_IP:-}" =~ ^[0-9.]+$ ]] || { ask "IP privato del gateway" ""; J_GW_IP=$REPLY; }
-  ok "Collegata al gateway come $J_VM_ID (il gateway la raggiunge da $J_GW_IP)"
-}
-
-# .env: imposta le chiavi indicate (KEY=valore ...) e toglie quelle delle versioni precedenti
-env_set() {
-  python3 - "$DEST/.env" "$@" <<'PYEOF'
-import os, sys
-path, pairs = sys.argv[1], dict(a.split("=", 1) for a in sys.argv[2:])
-if any(c in v for v in pairs.values() for c in "\n\r\0"):
-    sys.exit("valore non valido per il .env (contiene un a capo)")
-drop = {"VMS", "CONTROL_VM"}
-out, done = [], set()
-for line in open(path, encoding="utf-8").read().splitlines():
-    key = line.split("=", 1)[0].strip()
-    if "=" in line and not line.lstrip().startswith("#") and (key in pairs or key in drop):
-        if key in pairs and key not in done:
-            out.append(f"{key}={pairs[key]}"); done.add(key)
-        continue
-    out.append(line)
-out += [f"{k}={v}" for k, v in pairs.items() if k not in done]
-tmp = path + ".tmp"
-with open(tmp, "w", encoding="utf-8") as f:
-    f.write("\n".join(out) + "\n")
-os.chmod(tmp, 0o600)
-os.replace(tmp, path)
-PYEOF
-}
-
-gw_firewall() {
-  # 80 e 443 per sonde e utenti (indirizzo pubblico della VM), porta 8000 solo dal gateway
-  ufw allow OpenSSH >> "$LOG" 2>&1 || ufw allow 22/tcp >> "$LOG" 2>&1
-  ufw allow 80,443/tcp && ufw allow from "$J_GW_IP" to any port 8000 proto tcp
-  ufw --force enable
-}
 
 # Dominio cambiato: i nomi precedenti di questa macchina (OLD_HOSTS nel .env) restano nel Caddyfile e
 # netmon li rimanda al nuovo indirizzo; le sonde lo ricevono e lo salvano da sole. Stampa l'elenco
@@ -257,21 +128,7 @@ site_names() { local n=$1 h o=${OLD_HOSTS:-}; for h in ${o//,/ }; do n="$n, $h";
 # Primo nome del sito nel Caddyfile (quello attuale)
 caddy_domain() { awk 'NF && $1 !~ /^#/ && $NF == "{" {sub(/,$/, "", $1); print $1; exit}' /etc/caddy/Caddyfile 2>/dev/null || true; }
 
-# Caddyfile di un server netmon con il suo dominio (HTTPS automatico)
-caddy_site() {
-  local cf=/etc/caddy/Caddyfile
-  mkdir -p /etc/caddy
-  [ -f "$cf" ] && cp -p "$cf" "$cf.bak-$(date +%Y%m%d-%H%M%S)"
-  printf '# netmon · scritto da installa-server.sh\n%s {\n    encode zstd gzip\n    request_body {\n        max_size 10MB\n    }\n    header {\n        Strict-Transport-Security "max-age=31536000"\n        -Server\n    }\n    reverse_proxy 127.0.0.1:8000\n}\n' "$(site_names "$1")" > "$cf"
-  caddy validate --config "$cf" --adapter caddyfile && systemctl enable caddy && { systemctl reload caddy || systemctl restart caddy; }
-}
-
-if [ "$BEHIND_GW" = 1 ]; then
-  gw_join
-  REJOIN=0; [ -f "$DEST/.env" ] && REJOIN=1      # VM già installata: account, sonde e dati restano
-fi
-
-if [ -f "$DEST/.env" ] && [ "$BEHIND_GW" != 1 ]; then
+if [ -f "$DEST/.env" ]; then
   ok "Trovata un'installazione esistente in $DEST"
   if [ "$MODE" = install ]; then
     echo
@@ -532,35 +389,6 @@ public_url_env() {
   ok "Indirizzo pubblico per i link nelle email: https://$dom"
 }
 
-# VM dietro il gateway: il server ascolta anche sulla rete privata (il firewall lascia passare
-# solo gateway e altre VM). Con --dietro-gateway, oppure in aggiornamento se il .env ha VM_ID.
-gw_listen() {
-  install -d -m 755 /etc/systemd/system/netmon-server.service.d \
-    && sed -n 's/^ExecStart=\(.*\)--host 127.0.0.1\(.*\)$/[Service]\nExecStart=\nExecStart=\1--host 0.0.0.0\2/p' \
-         /etc/systemd/system/netmon-server.service > /etc/systemd/system/netmon-server.service.d/gateway.conf \
-    && grep -q -- '--host 0.0.0.0' /etc/systemd/system/netmon-server.service.d/gateway.conf
-}
-# Orchestratore: il gateway (proxy) nella stessa macchina, con lo stesso GATEWAY_SECRET
-gw_proxy_install() {
-  local G=/opt/netmon-gateway secret def
-  secret=$(sed -n 's/^GATEWAY_SECRET=//p' "$DEST/.env" | tail -n1)
-  [ -n "$secret" ] || return 1
-  def=$(sed -n 's/^DEFAULT_VM=//p' "$G/.env" 2>/dev/null | tail -n1)
-  id netmon-gw >/dev/null 2>&1 || useradd --system --home "$G" --shell /usr/sbin/nologin netmon-gw || return 1
-  install -d -m 755 -o root -g root "$G" \
-    && install -m 644 -o root -g root "$GW_DIR/gateway.py" "$GW_DIR/requirements.txt" "$G/" || return 1
-  [ -x "$G/venv/bin/python" ] || python3 -m venv "$G/venv" || return 1
-  "$G/venv/bin/pip" install --quiet --upgrade -r "$G/requirements.txt" || return 1
-  printf 'ORCHESTRATOR=http://127.0.0.1:8000\nGATEWAY_SECRET=%s\nDEFAULT_VM=%s\nUPSTREAM_TIMEOUT=60\nPUBLIC_URL=%s\nOLD_HOSTS=%s\n' \
-    "$secret" "$def" "$(envget PUBLIC_URL)" "$(envget OLD_HOSTS)" > "$G/.env.tmp" \
-    && chown root:netmon-gw "$G/.env.tmp" && chmod 640 "$G/.env.tmp" && mv "$G/.env.tmp" "$G/.env" || return 1
-  install -m 644 -o root -g root "$GW_DIR/netmon-gateway.service" /etc/systemd/system/ \
-    && systemctl daemon-reload && systemctl enable --quiet netmon-gateway && systemctl restart netmon-gateway
-}
-is_orch() { [ "$ORCH" = 1 ] || [ "$(sed -n 's/^ROLE=//p' "$DEST/.env" 2>/dev/null | tail -n1)" = orchestratore ]; }
-
-behind_gw() { [ "$BEHIND_GW" = 1 ] || [ -n "$(sed -n 's/^VM_ID=//p' "$DEST/.env" 2>/dev/null | tail -n1)" ]; }
-
 wait_local_health() {
   local i
   for i in $(seq 1 30); do
@@ -569,28 +397,6 @@ wait_local_health() {
   done
   return 1
 }
-
-if [ "$BEHIND_GW" = 1 ] && [ "$REJOIN" = 1 ]; then
-  STEPS=3
-  step "Aggiornamento dei file"
-  install_files
-  run "Collegamento al gateway nel file .env" env_set "VM_ID=$J_VM_ID" "GATEWAY_SECRET=$J_KEY" \
-    "TRUSTED_PROXIES=$J_GW_IP" "PUBLIC_URL=https://$VM_DOMAIN" "GATEWAY_URL=$J_PUBLIC_URL" "ROLE=" "OLD_HOSTS=$OLD_HOSTS"
-  fix_perms
-  step "Rete, firewall e HTTPS"
-  run "Ascolto sulla rete privata (gateway)" gw_listen
-  run "Firewall: 80 e 443, porta 8000 solo dal gateway ($J_GW_IP)" gw_firewall
-  command -v caddy >/dev/null || run "Installazione di Caddy" apt-get install -y caddy
-  run "Caddy per https://$VM_DOMAIN" caddy_site "$VM_DOMAIN"
-  old_hosts_note "$VM_DOMAIN"
-  step "Riavvio del server"
-  run "Riavvio" bash -c "systemctl daemon-reload && systemctl restart netmon-server"
-  if wait_local_health; then ok "Il server risponde"; else
-    journalctl -u netmon-server -n 20 --no-pager | sed 's/^/      /'; die "Il server non risponde dopo l'aggiornamento."; fi
-  printf '\n  %sVM %s collegata al gateway.%s Nel pannello (%s/admin, Server › Tutte le VM) risulta attiva\n  entro un minuto. Indirizzo della VM per sonde e utenti: https://%s\n\n' \
-    "$G$B" "$J_VM_ID" "$N" "$J_PUBLIC_URL" "$VM_DOMAIN"
-  exit 0
-fi
 
 if [ "$MODE" = update ]; then
   STEPS=3
@@ -601,8 +407,6 @@ if [ "$MODE" = update ]; then
   caddy_compress
   caddy_body_limit
   caddy_hsts
-  if behind_gw; then run "Ascolto sulla rete privata (gateway)" gw_listen; fi
-  if is_orch && [ -f "$GW_DIR/gateway.py" ]; then run "Gateway (indirizzo pubblico)" gw_proxy_install; fi
   step "Riavvio del server"
   run "Riavvio" bash -c "systemctl daemon-reload && systemctl restart netmon-server"
   if wait_local_health; then ok "Il server risponde"; else
@@ -630,29 +434,15 @@ busy=$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:(80|443)$/' | grep -v caddy || true)
 # ------------------------------------------------------------------ 3. domande
 step "Informazioni necessarie"
 
-# valori già presenti (riconfigurazione)
-envget() { [ -f "$DEST/.env" ] && sed -n "s/^$1=//p" "$DEST/.env" | tail -n1; }
-
 # IP pubblico della VM: prima dai metadati di Google Cloud, poi da un servizio esterno
 PUBIP=$(curl -fsS --max-time 2 -H "Metadata-Flavor: Google" \
   http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip 2>/dev/null || true)
 [[ "$PUBIP" =~ ^[0-9.]+$ ]] || PUBIP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
 [[ "$PUBIP" =~ ^[0-9.]+$ ]] && ok "IP pubblico della VM: $PUBIP" || { PUBIP=; warn "Non riesco a leggere l'IP pubblico della VM."; }
 
-if [ "$BEHIND_GW" = 1 ]; then
-  # VM probe: dominio e notifiche sono quelli del gateway, ricevuti collegandosi
-  DOMAIN=$VM_DOMAIN
-  SMTP_HOST=${J_SMTP_HOST:-}; SMTP_PORT=${J_SMTP_PORT:-}; SMTP_USER=${J_SMTP_USER:-}
-  SMTP_PASSWORD=${J_SMTP_PASSWORD:-}; SMTP_FROM=${J_SMTP_FROM:-}; TG_TOKEN=${J_TELEGRAM_BOT_TOKEN:-}; TG_CHAT=; botname=
-  EMAIL_ON=0; [ -n "$SMTP_USER" ] && EMAIL_ON=1
-  TG_ON=0; [ -n "$TG_TOKEN" ] && TG_ON=1
-  UFW_ON=1
-  ok "Indirizzo della VM: $DOMAIN; notifiche dal gateway: email $([ $EMAIL_ON = 1 ] && echo sì || echo no), Telegram $([ $TG_ON = 1 ] && echo sì || echo no)"
-else
 echo
-info "Serve un dominio che punti a questa VM: netmonhome.net (con più VM è quello del gateway;"
-info "ogni VM avrà poi vm1.netmonhome.net, vm2.…). Nel DNS crea un record A verso l'IP pubblico"
-info "di questa VM e apri le porte 80 e 443 (vedi guida, passo A2)."
+info "Serve un dominio che punti a questa VM (es. netmonhome.net): nel DNS crea un record A verso"
+info "l'IP pubblico di questa VM e apri le porte 80 e 443 (vedi guida, passo A2)."
 OLD_DOMAIN=$(caddy_domain)
 [[ "$OLD_DOMAIN" == *.* && "$OLD_DOMAIN" != *tuodominio* ]] || OLD_DOMAIN=netmonhome.net
 while :; do
@@ -770,17 +560,13 @@ fi
 [ "$EMAIL_ON$TG_ON" = 00 ] && warn "Né email né Telegram configurati: gli alert si vedranno solo nella pagina."
 info "Chat ID Telegram e topic ntfy sono personali: ognuno li indica in ⚙ Impostazioni → Notifiche."
 
-fi
-
 # --- firewall
-if [ "$BEHIND_GW" != 1 ]; then
 echo
 UFW_ON=0
 if ufw status 2>/dev/null | grep -q "Status: active"; then
   UFW_ON=1; info "Firewall ufw già attivo: aggiungo le porte 80 e 443."
 elif yes_no "Attivare il firewall della VM (ufw) lasciando aperti SSH, 80 e 443" s; then
   UFW_ON=1
-fi
 fi
 
 # ------------------------------------------------------------------ 4. installazione
@@ -795,12 +581,6 @@ else NEW_KEY=0; fi
 
 # .env: parte dal modello (o dal file attuale) e sostituisce solo i valori raccolti; niente commenti in riga
 BASE="$DEST/env.example"; [ -f "$DEST/.env" ] && { BASE="$DEST/.env"; cp -p "$DEST/.env" "$DEST/.env.bak-$(date +%Y%m%d-%H%M%S)"; }
-if [ "$BEHIND_GW" = 1 ]; then
-  export V_VM_ID="$J_VM_ID" V_GATEWAY_SECRET="$J_KEY" V_TRUSTED_PROXIES="$J_GW_IP" V_ROLE= V_GATEWAY_URL="$J_PUBLIC_URL"
-elif [ "$ORCH" = 1 ]; then
-  GWS=$(envget GATEWAY_SECRET); [ -n "$GWS" ] || GWS=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-  export V_ROLE=orchestratore V_VM_ID= V_GATEWAY_SECRET="$GWS" V_TRUSTED_PROXIES=
-fi
 V_API_TOKEN="$API_TOKEN" V_SMTP_HOST="${SMTP_HOST:-smtp.gmail.com}" V_SMTP_PORT="${SMTP_PORT:-587}" \
 V_SMTP_USER="$SMTP_USER" V_SMTP_PASSWORD="$SMTP_PASSWORD" V_SMTP_FROM="$SMTP_FROM" \
 V_TELEGRAM_BOT_TOKEN="$TG_TOKEN" V_DATA_DIR="$DEST/data" V_PUBLIC_URL="https://$DOMAIN" V_OLD_HOSTS="$OLD_HOSTS" \
@@ -828,13 +608,11 @@ if [ "$UFW_ON" = 1 ]; then
   sshport=$(ss -ltnpH 2>/dev/null | awk '/sshd/ {n=split($4,a,":"); print a[n]; exit}')
   run "Firewall: SSH" ufw allow "${sshport:-22}/tcp"
   run "Firewall: 80 e 443" ufw allow 80,443/tcp
-  [ "$BEHIND_GW" = 1 ] && run "Firewall: porta 8000 solo dal gateway ($J_GW_IP)" ufw allow from "$J_GW_IP" to any port 8000 proto tcp
   run "Firewall attivo" ufw --force enable
 fi
 
 # ------------------------------------------------------------------ 5. avvio e HTTPS
 step "Avvio e HTTPS"
-if [ "$BEHIND_GW" = 1 ]; then run "Ascolto sulla rete privata (gateway)" gw_listen; fi
 run "Avvio del servizio netmon-server" bash -c "systemctl daemon-reload && systemctl enable netmon-server && systemctl restart netmon-server"
 if wait_local_health; then ok "Il server risponde in locale"; else
   journalctl -u netmon-server -n 25 --no-pager | sed 's/^/      /'; die "Il server non si avvia: vedi le righe sopra."; fi
@@ -848,21 +626,15 @@ if :; then
   fi
   mkdir -p /etc/caddy
   [ -f "$CF" ] && cp -p "$CF" "$CF.bak-$(date +%Y%m%d-%H%M%S)"
-  if [ "$ORCH" = 1 ]; then
-    run "Gateway (indirizzo pubblico)" gw_proxy_install
-    sed "s/monitor.tuodominio.it/$(site_names "$DOMAIN")/" "$GW_DIR/Caddyfile" > "$CF"
-  else
   printf '# netmon · scritto da installa-server.sh\n%s {\n    encode zstd gzip\n    request_body {\n        max_size 10MB\n    }\n    header {\n        Strict-Transport-Security "max-age=31536000"\n        -Server\n    }\n    reverse_proxy 127.0.0.1:8000\n}\n' "$(site_names "$DOMAIN")" > "$CF"
-  fi
   run "Controllo del Caddyfile" caddy validate --config "$CF" --adapter caddyfile
   run "Avvio di Caddy" bash -c "systemctl enable caddy && (systemctl reload caddy || systemctl restart caddy)"
   old_hosts_note "$DOMAIN"
 
   HTTPS_OK=0
-  # Un dominio che non si risolve (es. vm2.interno, VM dietro il gateway) non avrà mai un certificato:
-  # niente attesa, si va avanti subito.
+  # Un dominio che non si risolve non avrà mai un certificato: niente attesa, si va avanti subito.
   if ! getent hosts "$DOMAIN" > /dev/null 2>&1; then
-    warn "$DOMAIN non si risolve: salto l'attesa del certificato HTTPS (normale per una VM dietro il gateway)."
+    warn "$DOMAIN non si risolve ancora: salto l'attesa del certificato HTTPS (Caddy riprova da solo)."
     HTTPS_SKIP=1
   else
     printf '  %s…%s Attendo il certificato HTTPS (fino a 2 minuti)' "$D" "$N"
@@ -887,7 +659,7 @@ fi
 acct() { runuser -u netmon -- "$DEST/venv/bin/python" "$DEST/account.py" "$@"; }
 ADMIN_USER=; ADMIN_PW=
 ACCOUNTS=$(acct elenco 2>>"$LOG" || true)      # letto tutto prima di cercare (con pipefail grep -q interromperebbe il comando)
-if [ "$BEHIND_GW" != 1 ] && grep -q "^Amministratori: nessuno" <<< "$ACCOUNTS"; then
+if grep -q "^Amministratori: nessuno" <<< "$ACCOUNTS"; then
   echo
   info "Creo l'amministratore della pagina https://$DOMAIN/admin, con una password provvisoria"
   info "che ti verrà chiesto di cambiare al primo accesso."
@@ -919,7 +691,7 @@ cat > "$SUMMARY" <<EOF
 netmon · server — informazioni da conservare ($(date '+%d/%m/%Y %H:%M'), versione $NETMON_VERSION)
 
 Pagina di stato ........ https://$DOMAIN
-Amministrazione ........ $([ "$BEHIND_GW" = 1 ] && echo "$J_PUBLIC_URL/admin (sul gateway)" || echo "https://$DOMAIN/admin")
+Amministrazione ........ https://$DOMAIN/admin
 Chiave del server ...... $API_TOKEN
 Indirizzo per la sonda . https://$DOMAIN/api/report
 Notifiche .............. $CHANNELS
@@ -947,7 +719,7 @@ printf '\n  %s┌%s┐%s\n' "$Y" "$line" "$N"
 printf '  %s│%s %-64s %s│%s\n' "$Y" "$N$B" "INFORMAZIONI DA SALVARE (es. nel gestore delle password)" "$N$Y" "$N"
 printf '  %s└%s┘%s\n' "$Y" "$line" "$N"
 printf '  Pagina di stato      %s%s%s\n' "$B" "https://$DOMAIN" "$N"
-printf '  Amministrazione      %s%s%s\n' "$B" "$([ "$BEHIND_GW" = 1 ] && echo "$J_PUBLIC_URL/admin" || echo "https://$DOMAIN/admin")" "$N"
+printf '  Amministrazione      %s%s%s\n' "$B" "https://$DOMAIN/admin" "$N"
 printf '  Chiave del server    %s%s%s%s\n' "$B$Y" "$API_TOKEN" "$N" "$([ "$NEW_KEY" = 0 ] && echo "  (invariata)")"
 printf '  Indirizzo sonda      %s\n' "https://$DOMAIN/api/report"
 printf '  Notifiche            %s\n' "$CHANNELS"
@@ -959,23 +731,6 @@ if [ -n "$ADMIN_PW" ]; then
 fi
 printf '\n  %sUna copia è in %s (leggibile solo da root).%s\n' "$D" "$SUMMARY" "$N"
 
-if [ "$BEHIND_GW" = 1 ]; then
-  printf '\n  %sVM %s collegata al gateway.%s Nel pannello (%s/admin, Server › Tutte le VM)\n  risulta attiva entro un minuto: ora puoi creare utenti su questa VM.\n  Le sue sonde usano l'"'"'indirizzo https://%s\n\n' "$G$B" "$J_VM_ID" "$N" "$J_PUBLIC_URL" "$DOMAIN"
-  exit 0
-fi
-if [ "$ORCH" = 1 ]; then
-  cat <<EOF
-
-  ${B}Prossimi passi${N}
-    1. Amministrazione https://$DOMAIN/admin$([ -n "$ADMIN_PW" ] && echo ": accedi come $ADMIN_USER con la password
-       provvisoria e scegline una nuova").
-    2. Server › Tutte le VM › Collega una VM: genera il token di ogni VM probe e installala con
-       sudo bash netmon/server/installa-server.sh --dietro-gateway
-    3. Utenti › Aggiungi utente: scegli su quale VM nasce l'utente.
-
-EOF
-  exit 0
-fi
 cat <<EOF
 
   ${B}Prossimi passi${N}

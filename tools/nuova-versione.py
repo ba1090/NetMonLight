@@ -144,7 +144,7 @@ def main():
         if f'__version__ = "{new}"' not in text:
             problems.append(f"{py.name}: versione non aggiornata")
 
-    for extra in (ROOT / "gateway" / "gateway.py", ROOT / "probe" / "netprobe-wifi"):
+    for extra in (ROOT / "probe" / "netprobe-wifi",):
         try:
             py_compile.compile(str(extra), doraise=True, cfile=None)
         except py_compile.PyCompileError as exc:

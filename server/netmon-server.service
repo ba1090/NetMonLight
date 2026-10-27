@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261026-104239
+# netmon versione 1.1.20261027-171500
 [Unit]
 Description=netmon - server di monitoraggio
 After=network-online.target

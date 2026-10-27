@@ -26,7 +26,7 @@ NetMon», tools/mac) con la chiave pubblica di rilascio installata in
 /usr/local/share/netmon/release-key.pub. Senza firma valida non si installa nulla, nemmeno da un
 pannello /admin compromesso. Sulle sonde l'origine la garantisce la firma della VM.
 """
-__version__ = "1.1.20261026-104239"
+__version__ = "1.1.20261027-171500"
 import json
 import os
 import re

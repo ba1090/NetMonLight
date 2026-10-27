@@ -11,7 +11,7 @@ Il disegno del logo sta QUI (LOGO, FAVICON, TOUCH): per cambiarlo si modifica qu
 rilancia. Le PNG servono dove l'SVG non funziona: email (Gmail e Outlook non mostrano SVG),
 icona della schermata Home di iPhone e Android, favicon.ico dei browser vecchi.
 La pagina locale della sonda ha una copia del solo FAVICON (non può importare file del server):
-se cambi il disegno, aggiorna anche LOGO_SVG, FAVICON_SVG e FAVICON_PNG in probe/config_web.py e LOGO_SVG in gateway/gateway.py.
+se cambi il disegno, aggiorna anche LOGO_SVG, FAVICON_SVG e FAVICON_PNG in probe/config_web.py.
 """
 import base64
 import os
