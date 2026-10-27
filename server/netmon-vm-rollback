@@ -1,0 +1,184 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Rollback dell'ultimo aggiornamento di netmon sulla VM.
+# Installazione: sudo install -m 755 -o root -g root netmon-vm-rollback /usr/local/sbin/
+# Alla fine di ogni installazione riuscita, netmon-vm-selfupdate scrive
+# /var/lib/netmon-vm/rollback.json (versione precedente, versione nuova, scadenza) e arma un timer
+# di systemd che lo fa partire con --auto quando la scadenza passa. Dal pannello /admin (scheda
+# Stato VM) lo si può confermare subito (commit) o far partire prima (rollback).
+# Il rollback rimette i FILE della versione precedente, non il database: events.db e auth.db
+# restano quelli della versione nuova. Le migrazioni sono aggiunte di colonne, quindi di norma la
+# versione vecchia ci gira sopra, ma non è garantito al 100%: se dopo il ripristino il server non
+# riparte, vengono rimessi i file della versione nuova (che girava) e l'esito resta «failed».
+# Il timer di systemd-run non sopravvive a un riavvio della VM: all'avvio
+# netmon-vm-rollback-boot.service lancia «rearm», che lo riarma per il tempo che resta (o fa
+# subito il rollback se la scadenza è passata mentre la VM era spenta).
+set -u
+umask 022
+SYS=/var/lib/netmon-vm
+RB="$SYS/rollback.json"                 # finestra aperta: scritto da netmon-vm-selfupdate
+DONE="$SYS/rollback.status"             # esito dell'ultimo ripristino
+BACKUP="$SYS/selfupdate-backup"         # copia di riserva dei file della versione precedente
+CUR="$SYS/rollback-current"             # copia dei file della versione nuova, durante il ripristino
+LOG="$SYS/selfupdate.log"
+DEST=/opt/netmon
+PY=/usr/bin/python3
+
+say() { echo "$(date '+%H:%M:%S') rollback: $*" >> "$LOG"; }
+
+rb_get() {   # $1 chiave: valore da rollback.json, oppure vuoto
+  "$PY" -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")
+except Exception: pass' "$RB" "$1" 2>/dev/null
+}
+
+write_done() {   # $1 stato (rolled_back|failed)
+  rm -f "$DONE.tmp"
+  printf '{"state":"%s","at":%s,"from":"%s","to":"%s"}\n' "$1" "$(date +%s)" "$FROM" "$TO" > "$DONE.tmp"
+  chmod 644 "$DONE.tmp"; mv -f "$DONE.tmp" "$DONE"
+}
+
+stop_timer() {
+  systemctl stop netmon-vm-rollback.timer >/dev/null 2>&1
+  systemctl reset-failed netmon-vm-rollback.timer >/dev/null 2>&1
+}
+
+snapshot() {   # $1 cartella: copia dei file installati (gli stessi della copia di riserva)
+  rm -rf "$1"; install -d -m 700 -o root -g root "$1" "$1/opt" "$1/sbin"
+  cp -a "$DEST"/*.py "$DEST"/requirements.txt "$DEST"/netmon-server.service "$1/opt/" 2>/dev/null
+  [ -d "$DEST/probe-dist" ] && cp -a "$DEST/probe-dist" "$1/opt/probe-dist"
+  cp -a /usr/local/sbin/netmon-* "$1/sbin/" 2>/dev/null
+  cp -a /etc/sudoers.d/netmon-vm "$1/sudoers" 2>/dev/null
+  cp -a /etc/systemd/system/netmon-server.service "$1/unit" 2>/dev/null
+  return 0
+}
+
+put_back() {   # $1 cartella da rimettere al posto dei file installati, poi riavvio del server
+  cp -a "$1/opt/"*.py "$1/opt/requirements.txt" "$1/opt/netmon-server.service" "$DEST/" 2>/dev/null
+  if [ -d "$1/opt/probe-dist" ]; then rm -rf "$DEST/probe-dist"; cp -a "$1/opt/probe-dist" "$DEST/probe-dist"; fi
+  # file nuovo e poi mv, mai sovrascrittura sul posto: tra questi c'è lo script che sta girando,
+  # e bash lo legge a pezzi mentre lo esegue
+  local f
+  for f in "$1/sbin/"*; do
+    [ -f "$f" ] || continue
+    cp -a "$f" "/usr/local/sbin/.${f##*/}.tmp" && mv -f "/usr/local/sbin/.${f##*/}.tmp" "/usr/local/sbin/${f##*/}"
+  done
+  [ -f "$1/sudoers" ] && cp -a "$1/sudoers" /etc/sudoers.d/netmon-vm
+  [ -f "$1/unit" ] && cp -a "$1/unit" /etc/systemd/system/netmon-server.service
+  systemctl daemon-reload >> "$LOG" 2>&1
+  systemctl restart netmon-server >> "$LOG" 2>&1
+}
+
+answers() {   # $1 versione attesa (vuota = qualunque): 0 se il server risponde entro 30 secondi
+  local i H
+  for i in $(seq 1 30); do
+    H=$(curl -fsS --max-time 2 http://127.0.0.1:8000/health 2>/dev/null)
+    if [ -n "$H" ] && { [ -z "$1" ] || printf '%s' "$H" | grep -q "\"version\":\"$1\""; }; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
+case "${1:-}" in
+  status) ;;
+  commit) ;;
+  rollback) ;;
+  --auto) ;;
+  rearm) ;;
+  *) echo "uso: netmon-vm-rollback status | commit | rollback | --auto | rearm" >&2; exit 2 ;;
+esac
+
+if [ "$1" = status ]; then
+  # stato per cli; il pannello legge rollback.json/rollback.status direttamente
+  if [ ! -f "$RB" ] && [ ! -f "$DONE" ]; then echo '{"pending":false}'; exit 0; fi
+  exec "$PY" - "$RB" "$DONE" <<'PYEOF'
+import json, sys, time
+out = {"pending": False}
+try:
+    d = json.load(open(sys.argv[1]))
+    out = d
+    out["pending"] = True
+    out["remaining"] = max(0, int((d.get("deadline") or 0) - time.time()))
+except Exception:
+    pass
+try:
+    out["last"] = json.load(open(sys.argv[2]))
+except Exception:
+    pass
+print(json.dumps(out))
+PYEOF
+fi
+
+# una sola operazione alla volta: il timer può scattare mentre dal pannello si conferma o si
+# chiede il rollback
+# (la conferma dal pannello aspetta poco: la richiesta HTTP non può restare appesa)
+WAIT=120; [ "$1" = commit ] && WAIT=20
+exec 9>"$SYS/rollback.lock"
+if command -v flock >/dev/null 2>&1 && ! flock -w "$WAIT" 9; then
+  say "un'altra operazione di rollback è in corso"; exit 1
+fi
+
+FROM=$(rb_get from)
+TO=$(rb_get to)
+
+if [ "$1" = rearm ]; then
+  # all'avvio della VM: il timer transitorio è andato perso con il riavvio
+  [ -f "$RB" ] || exit 0
+  DEADLINE=$(rb_get deadline)
+  case "$DEADLINE" in ''|*[!0-9]*) DEADLINE=0 ;; esac
+  LEFT=$((DEADLINE - $(date +%s)))
+  if [ "$LEFT" -gt 0 ]; then
+    stop_timer
+    if systemd-run --unit=netmon-vm-rollback --collect --quiet --on-active="$LEFT" \
+         /usr/local/sbin/netmon-vm-rollback --auto >> "$LOG" 2>&1; then
+      say "Avvio della VM: timer di rollback riarmato ($((LEFT / 60)) min alla scadenza)"
+      exit 0
+    fi
+    say "ATTENZIONE: timer di rollback non riarmato dopo l'avvio della VM"
+    exit 1
+  fi
+  say "Avvio della VM: la finestra di rollback è scaduta mentre la VM era spenta"
+  set -- --auto
+fi
+
+if [ -n "$TO" ] && [ -n "$FROM" ]; then say "finestra aperta: $FROM → $TO ($1)"; fi
+
+if [ "$1" = commit ]; then
+  if [ ! -f "$RB" ]; then echo "nessun rollback in attesa"; exit 0; fi
+  stop_timer
+  rm -f "$RB"
+  rm -rf "$BACKUP"          # la copia della versione vecchia non serve più
+  say "Rollback confermato: resta la versione $TO"
+  rm -f "$DONE"
+  exit 0
+fi
+
+if [ "$1" = rollback ] || [ "$1" = --auto ]; then
+  [ -f "$RB" ] || { say "nessun rollback in attesa"; exit 0; }
+  [ -d "$BACKUP/opt" ] && [ -d "$BACKUP/sbin" ] || { say "copia di riserva mancante: rollback impossibile"; exit 1; }
+  stop_timer
+  # copia dei file della versione nuova: se la vecchia non riparte, si torna a questa
+  snapshot "$CUR"
+  say "Ripristino della versione precedente (${FROM:-sconosciuta})"
+  put_back "$BACKUP"
+  # il server deve rispondere di nuovo (possibilmente con la versione vecchia)
+  if answers "$FROM"; then
+    say "Server di nuovo attivo${FROM:+ con la versione $FROM}"
+    rm -f "$RB"; rm -rf "$BACKUP" "$CUR"
+    write_done rolled_back
+    exit 0
+  fi
+  journalctl -u netmon-server -n 15 --no-pager -o cat >> "$LOG" 2>&1
+  say "Il server non risponde${FROM:+ con la versione $FROM}: si rimette la versione ${TO:-nuova}"
+  put_back "$CUR"
+  if answers "$TO"; then
+    say "Server di nuovo attivo${TO:+ con la versione $TO}: il rollback non è andato a buon fine"
+  else
+    journalctl -u netmon-server -n 15 --no-pager -o cat >> "$LOG" 2>&1
+    say "ATTENZIONE: il server non risponde nemmeno con la versione ${TO:-nuova}: reinstalla a mano il pacchetto"
+  fi
+  # la finestra si chiude: la versione vecchia su questo database non parte, riprovare non serve
+  rm -f "$RB"; rm -rf "$BACKUP" "$CUR"
+  write_done failed
+  exit 1
+fi

@@ -1,0 +1,187 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Aggiornamento di netmon sulla VM da un pacchetto netmon.zip caricato dal pannello /admin.
+# Installazione: sudo install -m 755 -o root -g root netmon-vm-selfupdate /usr/local/sbin/
+# Gira come root in un'unità systemd separata, avviata dal servizio (utente netmon) dopo che un
+# amministratore ha caricato e confermato il pacchetto. Il servizio lo ha già controllato, ma qui
+# non ci si fida: si lavora su una copia privata, si verifica la FIRMA DELL'AUTORE (chiave pubblica
+# di rilascio installata da installa-server.sh; la privata sta solo sul Mac dell'autore), si
+# ricontrolla tutto con il verificatore di root, si estrae in una cartella di root e si lancia
+# installa-server.sh --aggiorna di quel pacchetto. Senza firma valida non si installa nulla: chi
+# entrasse nel pannello /admin non può far girare codice come root sulla VM (né, attraverso la firma
+# della VM, sulle sonde). Se la VM non ha ancora la chiave, il pacchetto deve contenerla
+# (server/release-key.pub) ed essere firmato con quella: da lì in poi vale solo lei.
+# Prima una copia di riserva dei file installati: se il server non riparte, viene rimessa.
+set -u
+umask 022
+STAGE=/opt/netmon/data/upload/netmon.zip          # scritto dal servizio: mai usato direttamente
+STAGE_SIG="$STAGE.sig"                            # firma dell'autore (DER), scritta dal servizio
+RELEASE_KEY=/usr/local/share/netmon/release-key.pub   # chiave pubblica di rilascio (di root)
+SYS=/var/lib/netmon-vm                            # di root, leggibile dal servizio
+LOG="$SYS/selfupdate.log"
+STATUS="$SYS/selfupdate.status"
+BACKUP="$SYS/selfupdate-backup"
+CHECK=/usr/local/lib/netmon/pkgcheck.py           # copia di root del verificatore
+DEST=/opt/netmon
+PY=/usr/bin/python3                               # mai il Python di /opt/netmon (del servizio)
+STARTED=$(date +%s)
+VERSION=""
+OLD=""
+WORK=""
+
+write_status() {   # $1 stato, $2 codice di uscita
+  local fin=null
+  [ "$1" != running ] && fin=$(date +%s)
+  rm -f "$STATUS.tmp"
+  printf '{"state":"%s","started":%s,"finished":%s,"exit":%s,"version":"%s","from":"%s"}\n' \
+    "$1" "$STARTED" "$fin" "${2:-null}" "$VERSION" "$OLD" > "$STATUS.tmp"
+  chmod 644 "$STATUS.tmp"
+  mv -f "$STATUS.tmp" "$STATUS"
+}
+say() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
+finish() {   # $1 stato, $2 codice
+  [ -n "$WORK" ] && rm -rf "$WORK"
+  rm -f "$STAGE" "$STAGE_SIG"
+  say "== Fine: $1 =="
+  write_status "$1" "$2"
+  exit "$2"
+}
+fail() { say "ERRORE: $*"; finish error 1; }
+
+install -d -m 755 -o root -g root "$SYS"
+rm -f "$LOG"; : > "$LOG"; chmod 644 "$LOG"
+OLD=$(sed -n 's/^__version__ *= *"\([^"]*\)".*/\1/p' "$DEST/app.py" 2>/dev/null | head -n1)
+write_status running
+say "== $(date '+%d/%m/%Y') · aggiornamento di netmon da pacchetto caricato =="
+
+[ -x "$PY" ] || fail "python3 di sistema non trovato"
+[ -f "$CHECK" ] && [ ! -L "$CHECK" ] || fail "verificatore mancante: aggiorna una volta a mano con installa-server.sh --aggiorna"
+
+command -v openssl >/dev/null || fail "openssl mancante"
+
+# 1. copia privata del pacchetto e della firma (la cartella di caricamento è scrivibile dal servizio)
+[ -f "$STAGE" ] && [ ! -L "$STAGE" ] || fail "nessun pacchetto caricato"
+[ -f "$STAGE_SIG" ] && [ ! -L "$STAGE_SIG" ] || fail "pacchetto senza firma dell'autore: firmalo con «Firma NetMon» e caricalo con il file .sig"
+WORK=$(mktemp -d /run/netmon-vm-selfupdate.XXXXXX) || fail "cartella temporanea non creata"
+cp -P --no-preserve=all "$STAGE" "$WORK/netmon.zip" || fail "copia del pacchetto non riuscita"
+cp -P --no-preserve=all "$STAGE_SIG" "$WORK/netmon.zip.sig" || fail "copia della firma non riuscita"
+for f in netmon.zip netmon.zip.sig; do
+  { [ -L "$WORK/$f" ] || [ ! -f "$WORK/$f" ]; } && fail "pacchetto non valido"
+done
+[ "$(stat -c %s "$WORK/netmon.zip.sig")" -le 512 ] || fail "firma non valida"
+mkdir "$WORK/x"
+
+# 1b. firma dell'autore, prima di ogni altro controllo sul contenuto
+if [ -f "$RELEASE_KEY" ] && [ ! -L "$RELEASE_KEY" ]; then
+  USEKEY="$RELEASE_KEY"
+else
+  # prima chiave: quella contenuta nel pacchetto, che deve aver firmato il pacchetto stesso
+  USEKEY="$WORK/release-key.pub"
+  "$PY" - "$WORK/netmon.zip" "$USEKEY" >> "$LOG" 2>&1 <<'PYEOF' || fail "la VM non ha ancora la chiave di rilascio e il pacchetto non la contiene (server/release-key.pub)"
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as zf:
+    info = zf.getinfo("netmon/server/release-key.pub")
+    if info.file_size > 4096:
+        raise SystemExit("chiave troppo grande")
+    data = zf.read(info)
+with open(sys.argv[2], "xb") as f:
+    f.write(data)
+PYEOF
+  say "  · La VM non ha ancora una chiave di rilascio: si usa quella del pacchetto (prima chiave)"
+fi
+openssl dgst -sha256 -verify "$USEKEY" -signature "$WORK/netmon.zip.sig" "$WORK/netmon.zip" >/dev/null 2>&1 \
+  || fail "firma dell'autore non valida: pacchetto rifiutato"
+KEYFP=$(openssl pkey -pubin -in "$USEKEY" -outform DER 2>/dev/null | sha256sum | cut -c1-16 | sed 's/..../& /g;s/ $//')
+say "  ✔ Firma dell'autore verificata (chiave ${KEYFP})"
+
+# 2. verifica completa ed estrazione (versione più alta, file, percorsi, sintassi, firma se attiva)
+RES=$("$PY" "$CHECK" --target server --installed "$OLD" --extract "$WORK/x" "$WORK/netmon.zip" 2>&1)
+RC=$?
+echo "$RES" | "$PY" -c 'import json,sys
+try:
+    raw = sys.stdin.read()
+    d = json.loads(raw)
+    for st, t in d["checks"]:
+        mark = {"ok": "  ✔ ", "info": "  · ", "warn": "  ! ", "bad": "  ✘ "}.get(st, "  · ")
+        print(mark + t)
+except Exception: print(raw)' >> "$LOG" 2>&1
+[ "$RC" -eq 0 ] || fail "pacchetto non idoneo"
+VERSION=$(tr -cd '0-9.-' < "$WORK/x/netmon/VERSION" | head -c 40)
+say "Pacchetto idoneo: ${OLD:-sconosciuta} → $VERSION"
+write_status running
+
+# 2b. un rollback ancora aperto si conferma da solo: la copia di riserva sta per essere rifatta.
+# Prima si aspetta che finisca un eventuale rollback in corso (stesso lucchetto di netmon-vm-rollback)
+exec 9>"$SYS/rollback.lock"
+command -v flock >/dev/null 2>&1 && { flock -w 180 9 || fail "un rollback è ancora in corso: riprova tra poco"; }
+if [ -f "$SYS/rollback.json" ]; then
+  say "Rollback pendente confermato: si riparte con un nuovo aggiornamento"
+  rm -f "$SYS/rollback.json"; rm -f "$SYS/rollback.status"
+  systemctl stop netmon-vm-rollback.timer >/dev/null 2>&1
+  systemctl reset-failed netmon-vm-rollback.timer >/dev/null 2>&1
+fi
+
+# 3. copia di riserva di ciò che l'installazione sostituisce
+rm -rf "$BACKUP"; install -d -m 700 -o root -g root "$BACKUP" "$BACKUP/opt" "$BACKUP/sbin"
+cp -a "$DEST"/*.py "$DEST"/requirements.txt "$DEST"/netmon-server.service "$BACKUP/opt/" 2>/dev/null
+[ -d "$DEST/probe-dist" ] && cp -a "$DEST/probe-dist" "$BACKUP/opt/probe-dist"
+cp -a /usr/local/sbin/netmon-* "$BACKUP/sbin/" 2>/dev/null
+cp -a /etc/sudoers.d/netmon-vm "$BACKUP/sudoers" 2>/dev/null
+cp -a /etc/systemd/system/netmon-server.service "$BACKUP/unit" 2>/dev/null
+cp -a "$RELEASE_KEY" "$BACKUP/release-key.pub" 2>/dev/null
+restore() {
+  say "Ripristino della versione precedente (${OLD:-sconosciuta})"
+  cp -a "$BACKUP/opt/"*.py "$BACKUP/opt/requirements.txt" "$BACKUP/opt/netmon-server.service" "$DEST/" 2>/dev/null
+  [ -d "$BACKUP/opt/probe-dist" ] && { rm -rf "$DEST/probe-dist"; cp -a "$BACKUP/opt/probe-dist" "$DEST/probe-dist"; }
+  # file nuovo e poi mv, mai sovrascrittura sul posto: tra questi c'è questo script, che bash
+  # legge a pezzi mentre lo esegue
+  local f
+  for f in "$BACKUP/sbin/"*; do
+    [ -f "$f" ] || continue
+    cp -a "$f" "/usr/local/sbin/.${f##*/}.tmp" && mv -f "/usr/local/sbin/.${f##*/}.tmp" "/usr/local/sbin/${f##*/}"
+  done
+  [ -f "$BACKUP/sudoers" ] && cp -a "$BACKUP/sudoers" /etc/sudoers.d/netmon-vm
+  [ -f "$BACKUP/unit" ] && cp -a "$BACKUP/unit" /etc/systemd/system/netmon-server.service
+  # chiave di rilascio com'era prima (nessuna, se questo era il primo pacchetto con la chiave)
+  if [ -f "$BACKUP/release-key.pub" ]; then cp -a "$BACKUP/release-key.pub" "$RELEASE_KEY"; else rm -f "$RELEASE_KEY"; fi
+  systemctl daemon-reload >> "$LOG" 2>&1
+  systemctl restart netmon-server >> "$LOG" 2>&1
+}
+
+# 4. installazione con l'installer del pacchetto (senza domande)
+say "Installazione (installa-server.sh --aggiorna del pacchetto)"
+if ! NETMON_NONINTERACTIVE=1 NETMON_PKG_VERIFIED=1 bash "$WORK/x/netmon/server/installa-server.sh" --aggiorna < /dev/null >> "$LOG" 2>&1; then
+  restore; VERSION="$OLD"; fail "installazione non riuscita: ripristinata la versione precedente"
+fi
+
+# 5. il server deve rispondere con la nuova versione
+for i in $(seq 1 30); do
+  if curl -fsS --max-time 2 http://127.0.0.1:8000/health 2>/dev/null | grep -q "\"version\":\"$VERSION\""; then
+    say "Server attivo con la versione $VERSION"
+    # 5b. finestra di rollback: dal pannello /admin la si conferma entro 4 ore, altrimenti
+    # questo timer ripristina la versione precedente. Il timer vive come unità transitoria
+    # (systemd-run), quindi non tocca né sudoers né i file delle unità.
+    if [ -n "$OLD" ] && [ -x /usr/local/sbin/netmon-vm-rollback ]; then
+      WIN=$((4 * 3600))
+      NOW=$(date +%s); DEADLINE=$((NOW + WIN))
+      rm -f "$SYS/rollback.json.tmp"
+      printf '{"from":"%s","to":"%s","installed":%s,"deadline":%s}\n' \
+        "$OLD" "$VERSION" "$NOW" "$DEADLINE" > "$SYS/rollback.json.tmp"
+      chmod 644 "$SYS/rollback.json.tmp"; mv -f "$SYS/rollback.json.tmp" "$SYS/rollback.json"
+      systemctl stop netmon-vm-rollback.timer >/dev/null 2>&1
+      systemctl reset-failed netmon-vm-rollback.timer >/dev/null 2>&1
+      if systemd-run --unit=netmon-vm-rollback --collect --quiet --on-active="$WIN" \
+           /usr/local/sbin/netmon-vm-rollback --auto >> "$LOG" 2>&1; then
+        say "Rollback disponibile fino alle $(date -d "@$DEADLINE" '+%H:%M' 2>/dev/null || date '+%H:%M')"
+      else
+        say "ATTENZIONE: timer di rollback non armato: se non lo confermi da /admin, torna a mano"
+      fi
+    fi
+    finish ok 0
+  fi
+  sleep 1
+done
+journalctl -u netmon-server -n 15 --no-pager -o cat >> "$LOG" 2>&1
+restore
+VERSION="$OLD"
+fail "il server non risponde con la nuova versione: ripristinata la precedente"

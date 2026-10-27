@@ -1,0 +1,54 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Toglie netmon dalla sonda: servizi, programmi, configurazione, dati, chiave e verificatore degli
+# aggiornamenti, script di sistema, permessi e utente netprobe.
+# Installazione: sudo install -m 755 -o root -g root netprobe-uninstall /usr/local/sbin/
+# Lo lanciano installa-sonda.sh --disinstalla (dopo le domande) e il tasto «Disinstalla la sonda»
+# della pagina locale, in un'unità systemd separata: ferma anche il servizio della pagina, quindi
+# non può girare dentro di lui.
+# Lascia: pacchetti di sistema (Python, ping, curl… possono servire ad altro), reti Wi-Fi salvate
+# (toglierle farebbe perdere la rete alla sonda), /var/log/netmon-installazione.log e la cartella
+# da cui è stata lanciata l'installazione.
+set -u
+umask 077
+[ "${1:-}" = --conferma ] || { echo "uso: netprobe-uninstall --conferma [--senza-copia]" >&2; exit 2; }
+COPY=1; [ "${2:-}" = --senza-copia ] && COPY=0
+[ "$(id -u)" -eq 0 ] || { echo "serve root" >&2; exit 1; }
+LOG=/root/netmon-disinstallazione.log
+say() { echo "$(date '+%H:%M:%S') $*" | tee -a "$LOG"; }
+
+UNITS=(netmon-probe.service netmon-config.socket netmon-config.service)
+RUNS=(netprobe-upgrade netprobe-selfupdate netprobe-zipupdate netprobe-wifi)
+DIRS=(/opt/netprobe /etc/netprobe /var/lib/netprobe /var/lib/netprobe-sys /usr/local/share/netmon)
+# sulla stessa macchina c'è anche il server netmon: il verificatore dei pacchetti è condiviso
+[ -f /opt/netmon/app.py ] || DIRS+=(/usr/local/lib/netmon)
+FILES=(/usr/local/sbin/netprobe-upgrade /usr/local/sbin/netprobe-selfupdate /usr/local/sbin/netprobe-zipupdate
+       /usr/local/sbin/netprobe-wifi /etc/sudoers.d/netprobe /root/netmon-sonda-riepilogo.txt)
+
+: > "$LOG"; chmod 600 "$LOG"
+say "== Disinstallazione di netmon dalla sonda =="
+for u in "${RUNS[@]}"; do
+  if systemctl is-active --quiet "$u" 2>/dev/null; then
+    say "È in corso un'operazione della sonda ($u): disinstallazione annullata, riprova quando finisce."
+    exit 1
+  fi
+done
+
+if [ "$COPY" = 1 ] && [ -f /etc/netprobe/config.yaml ]; then
+  KEEP=/root/netprobe-config-$(date +%Y%m%d-%H%M%S).yaml
+  install -m 600 -o root -g root /etc/netprobe/config.yaml "$KEEP" && say "Copia della configurazione: $KEEP"
+fi
+systemctl disable --now "${UNITS[@]}" >> "$LOG" 2>&1
+say "Servizi fermati e disattivati: ${UNITS[*]}"
+for u in "${UNITS[@]}"; do rm -f "/etc/systemd/system/$u"; done
+systemctl daemon-reload >> "$LOG" 2>&1
+for u in "${UNITS[@]}"; do systemctl reset-failed "$u" >/dev/null 2>&1; done
+rm -rf -- "${DIRS[@]}"
+say "Tolti: ${DIRS[*]}"
+rm -f -- "${FILES[@]}"
+say "Tolti gli script di sistema netprobe-* e /etc/sudoers.d/netprobe"
+if id netprobe >/dev/null 2>&1; then userdel netprobe >> "$LOG" 2>&1 && say "Tolto l'utente netprobe"; fi
+say "netmon è stato tolto dalla sonda (registro: $LOG)."
+# per ultimo questo script: bash lo ha già aperto, toglierlo adesso non lo interrompe
+rm -f /usr/local/sbin/netprobe-uninstall
+exit 0

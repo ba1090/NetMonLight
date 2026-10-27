@@ -1,0 +1,9 @@
+# netmon versione 1.1.20261026-104239
+[Unit]
+Description=netmon - pagina di configurazione della sonda (avvio su richiesta)
+
+[Socket]
+ListenStream=0.0.0.0:8080
+
+[Install]
+WantedBy=sockets.target

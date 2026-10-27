@@ -1,0 +1,136 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Aggiornamento dei programmi di netmon sulla sonda alla versione del server.
+# Installazione: sudo install -m 755 -o root -g root netprobe-selfupdate /usr/local/sbin/
+# Gira come root in un'unità systemd separata, avviata dalla sonda (utente netprobe) dopo aver
+# scaricato e preparato i file in /var/lib/netprobe/update. Per sicurezza installa SOLO i
+# programmi Python della sonda (niente servizi, permessi o script di sistema), e solo se la
+# FIRMA del server è valida con la chiave pubblica installata da installa-sonda.sh (file di
+# root). Ricontrolla tutto su una copia privata e, se la sonda non riparte, rimette i file
+# precedenti. Log, stato e copia di riserva stanno in una cartella di root (SYS): nella
+# cartella della sonda, scrivibile dal servizio, root legge solo i file preparati.
+set -u
+umask 022
+STATE=/var/lib/netprobe
+SYS=/var/lib/netprobe-sys
+STAGE="$STATE/update"
+BACKUP="$SYS/update-backup"
+DEST=/opt/netprobe
+VPY="$DEST/venv/bin/python"
+KEY=/usr/local/share/netmon/update-key.pub
+LOG="$SYS/selfupdate.log"
+STATUS="$SYS/selfupdate.status"
+ALLOWED=(probe.py pinger.py config_web.py sysops.py)
+CHECK_SECONDS=${NETPROBE_CHECK_SECONDS:-20}
+STARTED=$(date +%s)
+VERSION=""
+WORK=""
+
+write_status() {   # $1 stato, $2 codice di uscita
+  local fin=null
+  [ "$1" != running ] && fin=$(date +%s)
+  rm -f "$STATUS.tmp"
+  printf '{"state":"%s","started":%s,"finished":%s,"exit":%s,"version":"%s"}\n' \
+    "$1" "$STARTED" "$fin" "${2:-null}" "$VERSION" > "$STATUS.tmp"
+  chmod 644 "$STATUS.tmp"
+  mv -f "$STATUS.tmp" "$STATUS"
+}
+say() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
+finish() {   # $1 stato, $2 codice
+  [ -n "$WORK" ] && rm -rf "$WORK"
+  rm -rf "$STAGE"
+  say "== Fine: $1 =="
+  write_status "$1" "$2"
+  exit "$2"
+}
+fail() { say "ERRORE: $*"; finish error 1; }
+
+install -d -m 755 -o root -g root "$SYS"
+rm -f "$LOG"
+: > "$LOG"
+chmod 644 "$LOG"
+write_status running
+say "== $(date '+%d/%m/%Y') · aggiornamento di netmon dal server =="
+
+# 1. Copia privata dei file preparati: la cartella di preparazione è scrivibile dalla sonda,
+#    quindi da qui in poi si lavora solo sulla copia di root.
+[ -d "$STAGE" ] && [ ! -L "$STAGE" ] || fail "nessun aggiornamento preparato"
+WORK=$(mktemp -d /run/netprobe-selfupdate.XXXXXX) || fail "cartella temporanea non creata"
+for name in "${ALLOWED[@]}" manifest manifest.sig VERSION; do
+  src="$STAGE/$name"
+  if [ -L "$src" ] || [ ! -f "$src" ]; then fail "file mancante o non valido: $name"; fi
+  cp -P --no-preserve=all "$src" "$WORK/$name" || fail "copia di $name non riuscita"
+  { [ -L "$WORK/$name" ] || [ ! -f "$WORK/$name" ]; } && fail "file non valido: $name"
+done
+extra=$(find "$STAGE" -mindepth 1 -maxdepth 1 | sed "s|^$STAGE/||" | grep -vxE 'probe\.py|pinger\.py|config_web\.py|sysops\.py|manifest|manifest\.sig|VERSION')
+[ -z "$extra" ] || fail "file non previsti nell'aggiornamento: $(printf '%s ' "$extra" | tr '\n' ' ')"
+
+VERSION=$(head -c 40 "$WORK/VERSION" | tr -cd '0-9.-')
+[ -n "$VERSION" ] || fail "versione non valida"
+OLD=$(grep -o '__version__ = "[^"]*"' "$DEST/probe.py" 2>/dev/null | cut -d'"' -f2)
+say "Versione installata: ${OLD:-sconosciuta} → nuova: $VERSION"
+# niente ritorni a versioni precedenti (anche se firmate)
+if [ -n "$OLD" ] && [ "$(printf '%s\n%s\n' "$OLD" "$VERSION" | sort -V | head -n1)" != "$OLD" ]; then
+  fail "la versione $VERSION è precedente a quella installata ($OLD)"
+fi
+
+# 2. Il manifesto deve elencare esattamente i file previsti, con le impronte giuste
+if grep -vqE '^[0-9a-f]{64}  (probe\.py|pinger\.py|config_web\.py|sysops\.py)$' "$WORK/manifest" \
+   || [ "$(wc -l < "$WORK/manifest")" -ne "${#ALLOWED[@]}" ]; then
+  fail "manifesto non valido"
+fi
+# firma del server sul manifesto: senza chiave o con firma sbagliata non si installa nulla
+[ -f "$KEY" ] && [ ! -L "$KEY" ] || fail "chiave di verifica mancante ($KEY): aggiorna la sonda con installa-sonda.sh --aggiorna"
+openssl pkeyutl -verify -pubin -inkey "$KEY" -rawin -in "$WORK/manifest" -sigfile "$WORK/manifest.sig" >> "$LOG" 2>&1 \
+  || fail "firma dell'aggiornamento non valida"
+say "Firma del server verificata"
+(cd "$WORK" && sha256sum --quiet -c manifest) >> "$LOG" 2>&1 || fail "impronte non corrispondenti"
+for name in "${ALLOWED[@]}"; do
+  grep -q "^__version__ = \"$VERSION\"" "$WORK/$name" || fail "$name non è della versione $VERSION"
+done
+say "Impronte verificate"
+
+# 3. Controllo della sintassi con il Python della sonda (senza eseguire nulla)
+[ -x "$VPY" ] || VPY=$(command -v python3)
+"$VPY" - "$WORK" >> "$LOG" 2>&1 <<'PY' || fail "i nuovi programmi contengono errori"
+import sys, pathlib
+for p in sorted(pathlib.Path(sys.argv[1]).glob("*.py")):
+    compile(p.read_bytes(), str(p), "exec")
+PY
+say "Sintassi verificata"
+
+# 4. Copia di riserva dei file attuali e installazione
+rm -rf "$BACKUP"
+install -d -m 700 -o root -g root "$BACKUP"
+for name in "${ALLOWED[@]}"; do
+  [ -f "$DEST/$name" ] && cp -p "$DEST/$name" "$BACKUP/$name"
+done
+restore() {
+  say "Ripristino della versione precedente (${OLD:-sconosciuta})"
+  for name in "${ALLOWED[@]}"; do
+    [ -f "$BACKUP/$name" ] && install -m 644 -o root -g root "$BACKUP/$name" "$DEST/$name"
+  done
+  "$VPY" -m compileall -q "$DEST" >/dev/null 2>&1
+  systemctl restart netmon-probe >> "$LOG" 2>&1
+  systemctl stop netmon-config.service >/dev/null 2>&1
+}
+for name in "${ALLOWED[@]}"; do
+  install -m 644 -o root -g root "$WORK/$name" "$DEST/$name.new" && mv -f "$DEST/$name.new" "$DEST/$name" \
+    || { restore; fail "installazione di $name non riuscita"; }
+done
+"$VPY" -m compileall -q "$DEST" >/dev/null 2>&1
+say "File installati in $DEST"
+
+# 5. Riavvio della sonda (la pagina locale si riavvierà alla prossima apertura) e verifica
+systemctl stop netmon-config.service >/dev/null 2>&1
+say "Riavvio della sonda"
+systemctl restart netmon-probe >> "$LOG" 2>&1
+sleep "$CHECK_SECONDS"
+if ! systemctl is-active --quiet netmon-probe || [ "$(systemctl show -p NRestarts --value netmon-probe 2>/dev/null || echo 0)" -gt 0 ]; then
+  journalctl -u netmon-probe -n 15 --no-pager -o cat >> "$LOG" 2>&1
+  restore
+  VERSION="${OLD}"
+  fail "la nuova versione non si avvia: ripristinata la precedente"
+fi
+say "Sonda attiva con la versione $VERSION"
+finish ok 0

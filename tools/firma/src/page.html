@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Firma NetMon</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23174A72'/%3E%3Cpath d='M32 14L47.6 23v18L32 50 16.4 41V23z' fill='none' stroke='%23fff' stroke-opacity='.5' stroke-width='2'/%3E%3Ccircle cx='32' cy='32' r='8' fill='%237FB8E0'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#F0F4F8;--panel:#fff;--ink:#1C2430;--muted:#5A6878;--line:#D5DFE9;--accent:#174A72;--accent-ink:#fff;
+  --ok:#2E7D3A;--warn:#9A6A00;--bad:#C0390B;--field:#fff;--hover:#E2ECF5}
+@media (prefers-color-scheme: dark){:root{--bg:#11161C;--panel:#19212A;--ink:#E6ECF2;--muted:#9AA8B8;--line:#2C3846;
+  --accent:#6FA8DC;--accent-ink:#0B1622;--ok:#6CC070;--warn:#F2C04A;--bad:#FF7B47;--field:#1F2832;--hover:#22303E}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+header{background:#0F3352;color:#fff;padding:14px 20px;display:flex;align-items:center;gap:14px}
+header svg{width:40px;height:40px;flex:none;border-radius:10px}
+header h1{margin:0;font-size:1.3rem;font-weight:600}header small{display:block;opacity:.75;font-size:.85rem;font-weight:400}
+header button{margin-left:auto}
+main{max-width:860px;margin:0 auto;padding:18px 16px 40px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:0 0 16px}
+section h2{margin:0 0 4px;font-size:1.1rem}
+.sub{color:var(--muted);font-size:.9rem;margin:0 0 12px}
+label{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
+input[type=password],input[type=file]{width:100%;font:inherit;color:var(--ink);background:var(--field);
+  border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}.row > div{flex:1 1 220px}
+button,a.btn{font:inherit;font-weight:600;border-radius:999px;padding:8px 18px;border:1.5px solid var(--line);
+  background:var(--panel);color:var(--ink);cursor:pointer;text-decoration:none;display:inline-block}
+button.primary,a.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button:disabled{opacity:.55;cursor:default}
+header button{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
+.fp{font-family:Consolas,"Roboto Mono",monospace;font-size:1.05rem;letter-spacing:.04em;background:var(--hover);
+  padding:3px 10px;border-radius:6px}
+pre{background:var(--hover);border-radius:8px;padding:10px;font-size:.8rem;overflow:auto;margin:10px 0}
+.msg{margin:12px 0 0;padding:10px 12px;border-radius:8px;border:1px solid var(--line)}
+.msg.ok{border-color:var(--ok);color:var(--ok)}.msg.bad{border-color:var(--bad);color:var(--bad)}
+.msg.warn{border-color:var(--warn);color:var(--warn)}.msg:empty{display:none}
+.msg p{margin:0 0 6px;color:var(--ink)}.acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+details.other{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+details.other summary{cursor:pointer;font-weight:600}
+.check{display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:.9rem;margin-top:10px}
+footer{color:var(--muted);font-size:.8rem;text-align:center}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#174A72"/>
+    <path d="M32 12L49.3 22v20L32 52 14.7 42V22z" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="1.8"/>
+    <path d="M32 32V12M32 32l17.3-10M32 32l17.3 10M32 32v20M32 32L14.7 42M32 32L14.7 22" stroke="#fff" stroke-width="1.8"/>
+    <g fill="#fff"><circle cx="32" cy="12" r="4"/><circle cx="49.3" cy="22" r="4"/><circle cx="49.3" cy="42" r="4"/>
+    <circle cx="32" cy="52" r="4"/><circle cx="14.7" cy="42" r="4"/><circle cx="14.7" cy="22" r="4"/></g>
+    <circle cx="32" cy="32" r="9" fill="#174A72"/><path d="M32 24.5L24 31.5h2.6V39h10.8v-7.5H40z" fill="#7FB8E0"/></svg>
+  <h1>Firma NetMon <small>firma dei pacchetti netmon per il pannello /admin</small></h1>
+  <button type="button" id="quit" title="Chiude il programma">Chiudi</button>
+</header>
+<main>
+  <section id="s-key">
+    <h2>Chiave di rilascio</h2>
+    <p class="sub" id="key-sub">Lettura…</p>
+    <div id="key-yes" hidden>
+      <p>Impronta: <span class="fp" id="fp"></span></p>
+      <p class="sub">Nel pannello /admin l'impronta è in <em>Server › Aggiornamento Netmon</em>: deve essere la stessa.</p>
+      <div class="acts">
+        <button type="button" id="dl-pub">Scarica la chiave pubblica</button>
+        <button type="button" id="copy-pub">Copia la chiave pubblica</button>
+        <button type="button" id="backup">Salva una copia di riserva</button>
+      </div>
+      <pre id="pub" hidden></pre>
+      <p class="msg" id="key-msg"></p>
+      <details class="other">
+        <summary>Usa la chiave di un altro computer</summary>
+        <p class="sub">Per firmare da più computer (per esempio Mac e Windows) serve la <strong>stessa</strong> chiave
+          su tutti: quella che la VM conosce già (la sua impronta è nel pannello, <em>Server › Aggiornamento Netmon</em>).
+          Sull'altro computer salva una copia di riserva, poi importala qui: sostituisce la chiave di questo computer,
+          che viene comunque tenuta da parte nella stessa cartella.</p>
+        <div class="row">
+          <div><label for="r-file">Copia di riserva (netmon-release-signing.key)</label><input type="file" id="r-file" accept=".key,.pem"></div>
+          <div><label for="r-pass">Password di quella chiave</label><input type="password" id="r-pass" autocomplete="current-password"></div>
+          <div style="flex:0 0 auto"><button type="button" id="replace">Usa questa chiave</button></div>
+        </div>
+      </details>
+    </div>
+    <div id="key-no" hidden>
+      <div class="row">
+        <div><label for="c-pass">Nuova password (almeno 10 caratteri)</label><input type="password" id="c-pass" autocomplete="new-password"></div>
+        <div><label for="c-pass2">Ripeti la password</label><input type="password" id="c-pass2" autocomplete="new-password"></div>
+        <div style="flex:0 0 auto"><button type="button" class="primary" id="create">Crea la chiave</button></div>
+      </div>
+      <p class="sub" style="margin-top:10px">Senza password la chiave non si può usare: annotala in un posto sicuro e, appena
+        creata, salva una copia di riserva.</p>
+      <h2 style="margin-top:18px">Oppure importa una copia di riserva</h2>
+      <p class="sub">Il file <code>netmon-release-signing.key</code> della copia di riserva, fatta da Firma NetMon su Mac o su Windows.</p>
+      <div class="row">
+        <div><label for="i-file">File della chiave</label><input type="file" id="i-file" accept=".key,.pem"></div>
+        <div><label for="i-pass">Password della chiave</label><input type="password" id="i-pass" autocomplete="current-password"></div>
+        <div style="flex:0 0 auto"><button type="button" id="import">Importa</button></div>
+      </div>
+      <p class="msg" id="new-msg"></p>
+    </div>
+  </section>
+
+  <section id="s-sign" hidden>
+    <h2>Firma un pacchetto</h2>
+    <p class="sub">Lo zip del rilascio (<code>netmon-&lt;versione&gt;.zip</code>). Se non contiene ancora la tua chiave pubblica,
+      la aggiungo io prima di firmarlo.</p>
+    <div class="row">
+      <div><label for="s-zip">Pacchetto</label><input type="file" id="s-zip" accept=".zip"></div>
+      <div><label for="s-pass">Password della chiave</label><input type="password" id="s-pass" autocomplete="current-password"></div>
+      <div style="flex:0 0 auto"><button type="button" class="primary" id="sign">Firma</button></div>
+    </div>
+    <label class="check" id="confirm-box" hidden><input type="checkbox" id="confirm">
+      <span>Sto cambiando chiave di proposito: firma lo stesso.</span></label>
+    <div class="msg" id="sign-msg"></div>
+  </section>
+
+  <section id="s-verify" hidden>
+    <h2>Verifica la firma di un pacchetto</h2>
+    <div class="row">
+      <div><label for="v-zip">Pacchetto</label><input type="file" id="v-zip" accept=".zip"></div>
+      <div><label for="v-sig">Firma (.sig)</label><input type="file" id="v-sig" accept=".sig"></div>
+      <div style="flex:0 0 auto"><button type="button" id="verify">Verifica</button></div>
+    </div>
+    <p class="msg" id="verify-msg"></p>
+  </section>
+  <footer id="foot"></footer>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const say = (sel, text, cls) => { const m = $(sel); m.className = "msg " + (cls || ""); m.textContent = text; };
+async function post(path, body) {
+  const opt = { method: "POST", body };
+  if (!(body instanceof FormData)) { opt.headers = { "Content-Type": "application/json" }; opt.body = JSON.stringify(body || {}); }
+  const r = await fetch(path, opt);
+  if (!r.ok) throw new Error("Errore " + r.status);
+  return r.json();
+}
+// I file si scaricano dalla pagina stessa (dati già ricevuti): funziona anche se il programma si è chiuso.
+function fileUrl(data, type) { return URL.createObjectURL(new Blob([data], { type })); }
+function fromB64(b64) { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+function saveFile(url, name) {
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+async function state() {
+  const s = await (await fetch("api/state")).json();
+  $("#foot").textContent = `Firma NetMon ${s.version} · chiave in ${s.dir}`;
+  $("#key-yes").hidden = !s.key; $("#key-no").hidden = !!s.key;
+  $("#s-sign").hidden = $("#s-verify").hidden = !s.key;
+  $("#key-sub").textContent = s.key ? "Su questo computer c'è la tua chiave di rilascio."
+    : "Su questo computer non c'è ancora una chiave di rilascio: creala oppure importa la tua copia di riserva.";
+  if (s.key) { $("#fp").textContent = s.fp; $("#pub").textContent = s.pub; }
+}
+$("#create").onclick = async () => {
+  try {
+    const r = await post("api/create", { password: $("#c-pass").value, repeat: $("#c-pass2").value });
+    if (!r.ok) return say("#new-msg", r.message, "bad");
+    $("#c-pass").value = $("#c-pass2").value = "";
+    await state();
+    say("#key-msg", `Chiave creata (impronta ${r.fp}). Salva subito una copia di riserva su una chiavetta tenuta lontana dal computer.`, "ok");
+  } catch (e) { say("#new-msg", e.message, "bad"); }
+};
+$("#import").onclick = async () => {
+  const f = $("#i-file").files[0];
+  if (!f) return say("#new-msg", "Scegli il file della chiave.", "bad");
+  const fd = new FormData(); fd.append("key", f); fd.append("password", $("#i-pass").value);
+  try {
+    const r = await post("api/import", fd);
+    if (!r.ok) return say("#new-msg", r.message, "bad");
+    $("#i-pass").value = ""; await state();
+    say("#key-msg", `Chiave importata (impronta ${r.fp}): deve essere la stessa mostrata nel pannello /admin.`, "ok");
+  } catch (e) { say("#new-msg", e.message, "bad"); }
+};
+$("#replace").onclick = async () => {
+  const f = $("#r-file").files[0];
+  if (!f) return say("#key-msg", "Scegli il file della copia di riserva (netmon-release-signing.key).", "bad");
+  const old = $("#fp").textContent;
+  if (!confirm(`La chiave di questo computer (${old}) viene sostituita da quella della copia di riserva. `
+      + "La vecchia resta da parte nella cartella della chiave. Continuare?")) return;
+  const fd = new FormData(); fd.append("key", f); fd.append("password", $("#r-pass").value); fd.append("replace", "1");
+  try {
+    const r = await post("api/import", fd);
+    if (!r.ok) return say("#key-msg", r.message, "bad");
+    $("#r-pass").value = ""; $("#r-file").value = ""; await state();
+    say("#key-msg", `Ora questo computer usa la chiave ${r.fp}: deve essere la stessa mostrata nel pannello /admin. `
+      + (r.kept ? "La chiave di prima è stata messa da parte nella cartella della chiave." : ""), "ok");
+  } catch (e) { say("#key-msg", e.message, "bad"); }
+};
+$("#copy-pub").onclick = async () => {
+  try { await navigator.clipboard.writeText($("#pub").textContent); say("#key-msg", "Chiave pubblica copiata.", "ok"); }
+  catch { $("#pub").hidden = false; say("#key-msg", "Copia non riuscita: selezionala qui sotto.", "warn"); }
+};
+$("#dl-pub").onclick = () => saveFile(fileUrl($("#pub").textContent, "text/plain"), "release-key.pub");
+$("#backup").onclick = async () => {
+  let r;
+  try { r = await post("api/backup"); } catch (e) { return say("#key-msg", "Il programma non risponde: riaprilo. (" + e.message + ")", "bad"); }
+  if (!r.ok) return say("#key-msg", r.message, "bad");
+  saveFile(fileUrl(r.key, "application/octet-stream"), "netmon-release-signing.key");
+  setTimeout(() => saveFile(fileUrl(r.pub, "text/plain"), "netmon-release-key.pub"), 400);
+  say("#key-msg", "Scaricati netmon-release-signing.key (chiave privata, protetta dalla password) e netmon-release-key.pub. "
+    + "Spostali su una chiavetta tenuta lontana dal computer e ricorda la password.", "ok");
+};
+$("#sign").onclick = async () => {
+  const f = $("#s-zip").files[0];
+  if (!f) return say("#sign-msg", "Scegli il pacchetto netmon-….zip.", "bad");
+  const fd = new FormData(); fd.append("zip", f); fd.append("password", $("#s-pass").value);
+  if ($("#confirm").checked) fd.append("confirm", "1");
+  $("#sign").disabled = true; say("#sign-msg", "Firma in corso…");
+  try {
+    const r = await post("api/sign", fd);
+    if (r.need === "confirm") {
+      $("#confirm-box").hidden = false;
+      return say("#sign-msg", `${r.message} Chiave nel pacchetto: ${r.other}; la tua: ${r.fp}.`, "warn");
+    }
+    if (!r.ok) return say("#sign-msg", r.message, "bad");
+    $("#s-pass").value = ""; $("#confirm").checked = false; $("#confirm-box").hidden = true;
+    const box = $("#sign-msg"); box.className = "msg ok"; box.textContent = "";
+    const p = t => { const e = document.createElement("p"); e.textContent = t; box.appendChild(e); };
+    p(`Pacchetto netmon ${r.version} firmato con la tua chiave (${r.fp}).`);
+    if (r.added_key) p(`Ho aggiunto la tua chiave pubblica al pacchetto: carica nel pannello lo zip appena scaricato (${r.zip_name}), non quello di prima.`);
+    p(`Nel pannello /admin › Server › Aggiornamento Netmon seleziona insieme ${r.zip_name || f.name} e ${r.sig_name}.`);
+    const acts = document.createElement("div"); acts.className = "acts";
+    const zipUrl = r.zip_b64 ? fileUrl(fromB64(r.zip_b64), "application/zip") : null;
+    const sigUrl = fileUrl(r.sig_text, "application/octet-stream");
+    for (const [url, name, label] of [[zipUrl, r.zip_name, "Scarica lo zip"], [sigUrl, r.sig_name, "Scarica la firma"]]) {
+      if (!url) continue;
+      const a = document.createElement("a"); a.className = "btn"; a.href = url; a.download = name; a.textContent = `${label} (${name})`;
+      acts.appendChild(a);
+    }
+    box.appendChild(acts);
+    if (zipUrl) saveFile(zipUrl, r.zip_name);
+    setTimeout(() => saveFile(sigUrl, r.sig_name), 400);
+  } catch (e) { say("#sign-msg", e.message, "bad"); }
+  finally { $("#sign").disabled = false; }
+};
+$("#s-zip").onchange = () => { $("#confirm").checked = false; $("#confirm-box").hidden = true; say("#sign-msg", ""); };
+$("#verify").onclick = async () => {
+  const z = $("#v-zip").files[0], s = $("#v-sig").files[0];
+  if (!z || !s) return say("#verify-msg", "Scegli lo zip e il suo file .sig.", "bad");
+  const fd = new FormData(); fd.append("zip", z); fd.append("sig", s);
+  try {
+    const r = await post("api/verify", fd);
+    say("#verify-msg", r.ok ? `Firma valida: ${z.name}${r.message ? " (versione " + r.message + ")" : ""} è firmato con la tua chiave (${r.fp}).`
+      : r.message, r.ok ? "ok" : "bad");
+  } catch (e) { say("#verify-msg", e.message, "bad"); }
+};
+$("#quit").onclick = async () => {
+  try { await post("api/quit"); } catch {}
+  document.body.innerHTML = "<main><section><h2>Firma NetMon è chiuso.</h2><p>Puoi chiudere questa scheda.</p></section></main>";
+};
+// segnale di vita: chiusa la pagina, il programma si chiude da solo dopo poco
+setInterval(() => { post("api/ping").catch(() => {}); }, 10000);
+state().catch(e => { $("#key-sub").textContent = "Il programma non risponde: riaprilo. (" + e.message + ")"; });
+</script>
+</body>
+</html>

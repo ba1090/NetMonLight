@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="it" data-lang="__NETMON_LANG__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Informativa sulla privacy · netmon</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0F3352">
+<!--
+  Informativa sulla privacy (art. 13 GDPR) di netmon, in italiano, inglese, tedesco e francese.
+  Servita su /privacy e linkata in fondo a ogni pagina; si installa con il server. Per una versione
+  diversa senza aspettare un aggiornamento:
+    sudo install -m 644 -o netmon -g netmon privacy.html /opt/netmon/data/privacy.html
+  (quella in data/ ha la precedenza e gli aggiornamenti non la toccano).
+  Il server sostituisce __NETMON_LOGO__ con il logo, __NETMON_LANG__ con la lingua del visitatore e __NETMON_CONSERVAZIONE_XX__
+  con la durata attuale dello storico nelle quattro lingue. Fa fede il testo italiano.
+  Se cambi le altre durate (.env: ADMIN_EVENTS_DAYS, ORPHAN_DAYS) aggiorna la sezione 6 in tutte le lingue.
+-->
+<style>
+:root{--bg:#F0F4F8;--fg:#1C2430;--muted:#5A6878;--line:#D5DFE9;--accent:#174A72;--panel:#FFFFFF}
+@media (prefers-color-scheme: dark){:root{--bg:#18151A;--fg:#EEE;--muted:#AAA;--line:#3A3238;--panel:#221D24}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 64px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px;color:var(--fg);text-decoration:none}
+.brand svg{width:36px;height:36px;border-radius:8px;flex:none}
+select{appearance:none;-webkit-appearance:none;font:inherit;font-size:15px;color:var(--fg);background:var(--panel)
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23888' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 14px center;
+  border:1px solid var(--line);border-radius:9999px;padding:7px 36px 7px 14px;cursor:pointer}
+h1{font-size:28px;margin:0 0 4px;line-height:1.25}h2{font-size:19px;margin:32px 0 8px;color:var(--accent)}
+p,li{margin:6px 0}ul{padding-left:22px}.muted{color:var(--muted)}
+table{border-collapse:collapse;width:100%;margin:8px 0;font-size:15px}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+a{color:var(--accent)}
+.trial{border-left:4px solid var(--accent);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;margin:16px 0}
+</style>
+</head>
+<body>
+<main>
+<div class="top">
+  <a class="brand" href="/status">__NETMON_LOGO__<span>netmon</span></a>
+  <select id="lang" aria-label="Lingua · Language · Sprache · Langue">
+    <option value="it">Italiano</option><option value="en">English</option>
+    <option value="de">Deutsch</option><option value="fr">Français</option>
+  </select>
+</div>
+
+<!-- ================================================================ italiano -->
+<article lang="it">
+<h1>Informativa sulla privacy</h1>
+<p class="muted">Servizio netmon · ultimo aggiornamento 14 ottobre 2026</p>
+<p class="trial"><strong>Fase di prova.</strong> netmon è in prova con un piccolo gruppo di utenti, fino a nuova comunicazione. Il servizio può avere interruzioni o cambiare. Quando la prova finisce te lo diciamo via email: i dati vengono cancellati entro 30 giorni da quella comunicazione, e prima puoi scaricarli con <em>Scarica i miei dati</em>.</p>
+
+<h2>1. Chi tratta i tuoi dati</h2>
+<p>Titolare del trattamento: il gestore del servizio netmon (NetMon Home tool),
+email <a href="mailto:info.netmonitor@gmail.com">info.netmonitor@gmail.com</a>. Per qualsiasi domanda sui tuoi dati o per esercitare i
+tuoi diritti scrivi a questo indirizzo.</p>
+
+<h2>2. Quali dati trattiamo</h2>
+<ul>
+<li><strong>Account</strong>: indirizzo email, password (conservata solo come impronta, nessuno può leggerla),
+lingua, data di registrazione e dell'ultimo accesso, conferma dell'email.</li>
+<li><strong>Notifiche</strong>: i canali che scegli (email, chat Telegram, indirizzo ntfy) e quali avvisi ricevere.</li>
+<li><strong>Sessioni</strong>: data di accesso, scadenza e il tipo di browser (user agent) di ogni accesso aperto.</li>
+<li><strong>Dati delle sonde</strong>, inviati dalle sonde che installi nella tua rete:
+nome della sonda, dispositivi controllati (nome che scegli, indirizzo IP o nome di rete) e i risultati dei ping,
+reti Wi-Fi (nome, segnale), stato e traffico del FRITZ!Box e dei repeater (velocità della linea, dati scambiati,
+numero di dispositivi collegati, rete mesh con nomi e indirizzi dei dispositivi), test di velocità, temperatura e
+carico della sonda, eventi e avvisi.</li>
+<li><strong>Controlli di sicurezza</strong>, solo se li avvii tu o li programmi: porte aperte e servizi trovati sui
+dispositivi che scegli, con il livello di rischio.</li>
+<li><strong>Dati tecnici</strong>: indirizzo IP e orario delle richieste al server, nel registro di sistema,
+per la sicurezza (per esempio i tentativi di accesso non riusciti).</li>
+</ul>
+<p>I dati delle sonde possono riguardare <strong>altre persone della tua casa</strong> (per esempio un dispositivo
+chiamato «Telefono di Anna»). Usa nomi che non identifichino le persone, se possibile, e informa chi usa la tua rete.</p>
+<p>Le credenziali del FRITZ!Box e i token delle sonde restano sulla sonda: il server non le riceve.
+Le password delle reti Wi-Fi che aggiungi dalla pagina passano dal server solo per essere consegnate
+alla sonda e non vengono salvate.</p>
+
+<h2>3. Perché e su quale base</h2>
+<table>
+<tr><th>Scopo</th><th>Base giuridica (art. 6 GDPR)</th></tr>
+<tr><td>Fornirti il servizio: account, pagina di stato, storico, avvisi</td><td>Esecuzione del contratto (lett. b)</td></tr>
+<tr><td>Email di servizio (conferma dell'indirizzo, inviti, avvisi di manutenzione)</td><td>Esecuzione del contratto (lett. b)</td></tr>
+<tr><td>Sicurezza del server: registro degli accessi, limiti ai tentativi</td><td>Legittimo interesse a proteggere il servizio e i dati (lett. f)</td></tr>
+</table>
+<p>Non usiamo i dati per pubblicità o profilazione e non li vendiamo. La pagina usa solo cookie tecnici
+(sessione e lingua), necessari al funzionamento: non servono consensi.</p>
+
+<h2>4. Dove sono e chi li riceve</h2>
+<ul>
+<li>Il servizio usa più server: un <strong>server di accesso</strong>, dove entri e dove gli amministratori gestiscono il
+servizio, e i <strong>server degli utenti</strong>. Il tuo account, le tue sonde e il loro storico stanno solo sul server
+del tuo account; il server di accesso usa la tua email per portarti lì e non conserva i dati delle sonde.</li>
+<li>Server: Google Cloud (Google Cloud EMEA Limited, Irlanda), con i dati in un datacenter nell'Unione europea;
+Google agisce come responsabile del trattamento (art. 28) secondo i suoi termini sul trattamento dei dati (Cloud Data Processing Addendum).</li>
+<li>Invio delle email: Brevo (Sendinblue SAS, Francia), con i dati nell'Unione europea; Brevo agisce come responsabile del trattamento (art. 28) secondo il suo accordo sul trattamento dei dati.</li>
+<li>Solo se li attivi tu: <strong>Telegram</strong> (Telegram Messenger Inc., fuori dall'UE) e <strong>ntfy</strong>
+(il servizio ntfy che indichi, per esempio ntfy.sh negli Stati Uniti) ricevono il testo degli avvisi.</li>
+<li>Test di velocità: li fa la sonda direttamente con Cloudflare (speed.cloudflare.com), dalla tua connessione.</li>
+<li>Gli amministratori del server vedono la tua email e lo stato delle tue sonde (non le misure) per gestire il
+servizio. Oggi l'amministratore è il gestore del servizio.</li>
+</ul>
+<p>La pagina non carica niente da altri siti (nemmeno i caratteri): il tuo browser parla solo con i server di netmon.</p>
+
+<h2>5. Sicurezza</h2>
+<p>Connessione cifrata (HTTPS), password e token conservati solo come impronta, limiti ai tentativi di accesso,
+verifica in due passaggi per gli amministratori, dati cancellati sovrascritti nel database.
+Il disco del server è cifrato da Google Cloud. Non vengono fatte copie di sicurezza dei dati.</p>
+
+<h2>6. Per quanto tempo</h2>
+<table>
+<tr><th>Dati</th><th>Durata</th></tr>
+<tr><td>Account, notifiche, sonde</td><td>Finché non elimini l'account</td></tr>
+<tr><td>Storico delle misure ed eventi delle sonde</td><td>__NETMON_CONSERVAZIONE_IT__ (puoi cambiarla in Impostazioni → Conservazione dei dati); al massimo 5000 eventi per sonda</td></tr>
+<tr><td>Tutti i dati, alla fine della prova</td><td>Cancellati entro 30 giorni dalla comunicazione di fine prova</td></tr>
+<tr><td>Sessioni</td><td>12 ore, o 30 giorni con «Ricordami su questo dispositivo»</td></tr>
+<tr><td>Registro amministrativo (contiene l'email alla registrazione)</td><td>365 giorni; all'eliminazione dell'account l'email viene tolta</td></tr>
+<tr><td>Registro di sistema (IP, accessi)</td><td>30 giorni</td></tr>
+<tr><td>Sonde rimaste senza account («Elimina solo l'account»)</td><td>Cancellate con il loro storico dopo 30 giorni senza contatti</td></tr>
+</table>
+
+<h2>7. I tuoi diritti</h2>
+<ul>
+<li><strong>Accesso e portabilità</strong> (art. 15 e 20): in <em>Impostazioni → Account e backup → Scarica i miei dati</em>
+ottieni subito un file con tutti i dati che il server conserva su di te (JSON e CSV).</li>
+<li><strong>Rettifica</strong> (art. 16): nomi, notifiche e impostazioni si cambiano dalla pagina; per l'email scrivici.</li>
+<li><strong>Cancellazione</strong> (art. 17): in <em>Impostazioni → Account e backup</em> puoi eliminare l'account da solo,
+anche insieme a tutti i dati delle sonde.</li>
+<li><strong>Limitazione e opposizione</strong> (art. 18 e 21): scrivi all'indirizzo della sezione 1.</li>
+<li><strong>Reclamo</strong>: puoi rivolgerti al Garante per la protezione dei dati personali
+(<a href="https://www.garanteprivacy.it">garanteprivacy.it</a>) o all'autorità del paese in cui vivi.</li>
+</ul>
+<p>Rispondiamo alle richieste entro un mese.</p>
+
+<h2>8. Modifiche</h2>
+<p>Se questa informativa cambia in modo importante te lo diremo via email prima che le modifiche valgano.</p>
+</article>
+
+<!-- ================================================================ English -->
+<article lang="en" hidden>
+<h1>Privacy notice</h1>
+<p class="muted">netmon service · last updated 14 October 2026 · translation: the Italian text prevails</p>
+<p class="trial"><strong>Trial phase.</strong> netmon is being tested with a small group of users, until further notice. The service may have interruptions or change. When the trial ends we will tell you by email: the data is deleted within 30 days of that notice, and before then you can download it with <em>Download my data</em>.</p>
+
+<h2>1. Who processes your data</h2>
+<p>Data controller: the operator of the netmon service (NetMon Home tool),
+email <a href="mailto:info.netmonitor@gmail.com">info.netmonitor@gmail.com</a>. Write to this address for any
+question about your data or to exercise your rights.</p>
+
+<h2>2. What data we process</h2>
+<ul>
+<li><strong>Account</strong>: email address, password (stored only as a hash, nobody can read it),
+language, date of registration and of last login, email confirmation.</li>
+<li><strong>Notifications</strong>: the channels you choose (email, Telegram chat, ntfy address) and which alerts to receive.</li>
+<li><strong>Sessions</strong>: login date, expiry and browser type (user agent) of every open session.</li>
+<li><strong>Probe data</strong>, sent by the probes you install in your network:
+probe name, monitored devices (the name you choose, IP address or network name) and ping results,
+Wi-Fi networks (name, signal), status and traffic of the FRITZ!Box and repeaters (line speed, data exchanged,
+number of connected devices, mesh network with device names and addresses), speed tests, temperature and
+load of the probe, events and alerts.</li>
+<li><strong>Security checks</strong>, only if you start or schedule them: open ports and services found on the
+devices you choose, with the risk level.</li>
+<li><strong>Technical data</strong>: IP address and time of requests to the server, in the system log,
+for security (for example failed login attempts).</li>
+</ul>
+<p>Probe data may concern <strong>other people in your home</strong> (for example a device named
+“Anna's phone”). Where possible use names that do not identify people, and inform those who use your network.</p>
+<p>FRITZ!Box credentials and probe tokens stay on the probe: the server does not receive them.
+Wi-Fi passwords you add from the page pass through the server only to be delivered to the probe
+and are not stored.</p>
+
+<h2>3. Why and on what legal basis</h2>
+<table>
+<tr><th>Purpose</th><th>Legal basis (Art. 6 GDPR)</th></tr>
+<tr><td>Providing the service: account, status page, history, alerts</td><td>Performance of a contract (point b)</td></tr>
+<tr><td>Service emails (address confirmation, invitations, maintenance notices)</td><td>Performance of a contract (point b)</td></tr>
+<tr><td>Server security: access log, limits on attempts</td><td>Legitimate interest in protecting the service and the data (point f)</td></tr>
+</table>
+<p>We do not use the data for advertising or profiling and we do not sell it. The page uses only technical cookies
+(session and language) needed for it to work: no consent is required.</p>
+
+<h2>4. Where the data is and who receives it</h2>
+<ul>
+<li>The service uses several servers: an <strong>access server</strong>, where you sign in and where the administrators manage the
+service, and the <strong>user servers</strong>. Your account, your probes and their history are only on the server
+of your account; the access server uses your email to take you there and does not keep probe data.</li>
+<li>Server: Google Cloud (Google Cloud EMEA Limited, Ireland), with the data in a data centre in the European Union;
+Google acts as processor (Art. 28) under its data processing terms (Cloud Data Processing Addendum).</li>
+<li>Sending emails: Brevo (Sendinblue SAS, France), with the data in the European Union; Brevo acts as processor (Art. 28) under its data processing agreement.</li>
+<li>Only if you enable them: <strong>Telegram</strong> (Telegram Messenger Inc., outside the EU) and <strong>ntfy</strong>
+(the ntfy service you specify, for example ntfy.sh in the United States) receive the text of the alerts.</li>
+<li>Speed tests: the probe runs them directly with Cloudflare (speed.cloudflare.com), from your connection.</li>
+<li>The server administrators see your email and the status of your probes (not the measurements) to manage the
+service. Currently the administrator is the service operator.</li>
+</ul>
+<p>The page loads nothing from other sites (not even fonts): your browser talks only to the netmon servers.</p>
+
+<h2>5. Security</h2>
+<p>Encrypted connection (HTTPS), passwords and tokens stored only as hashes, limits on login attempts,
+two-step verification for administrators, deleted data overwritten in the database.
+The server disk is encrypted by Google Cloud. No backup copies of the data are made.</p>
+
+<h2>6. How long</h2>
+<table>
+<tr><th>Data</th><th>Retention</th></tr>
+<tr><td>Account, notifications, probes</td><td>Until you delete the account</td></tr>
+<tr><td>Probe measurement history and events</td><td>__NETMON_CONSERVAZIONE_EN__ (you can change it in Settings → Data retention); at most 5000 events per probe</td></tr>
+<tr><td>All data, at the end of the trial</td><td>Deleted within 30 days of the end-of-trial notice</td></tr>
+<tr><td>Sessions</td><td>12 hours, or 30 days with “Remember me on this device”</td></tr>
+<tr><td>Administrative log (contains the email at registration)</td><td>365 days; when the account is deleted the email is removed</td></tr>
+<tr><td>System log (IP, logins)</td><td>30 days</td></tr>
+<tr><td>Probes left without an account (“Delete only the account”)</td><td>Deleted with their history after 30 days without contact</td></tr>
+</table>
+
+<h2>7. Your rights</h2>
+<ul>
+<li><strong>Access and portability</strong> (Art. 15 and 20): in <em>Settings → Account and backup → Download my data</em>
+you immediately get a file with all the data the server keeps about you (JSON and CSV).</li>
+<li><strong>Rectification</strong> (Art. 16): names, notifications and settings can be changed from the page; for the email, write to us.</li>
+<li><strong>Erasure</strong> (Art. 17): in <em>Settings → Account and backup</em> you can delete the account yourself,
+also together with all the probe data.</li>
+<li><strong>Restriction and objection</strong> (Art. 18 and 21): write to the address in section 1.</li>
+<li><strong>Complaint</strong>: you can contact the Italian Data Protection Authority (Garante per la protezione dei dati personali,
+<a href="https://www.garanteprivacy.it">garanteprivacy.it</a>) or the authority of the country where you live.</li>
+</ul>
+<p>We answer requests within one month.</p>
+
+<h2>8. Changes</h2>
+<p>If this notice changes significantly we will tell you by email before the changes take effect.</p>
+</article>
+
+<!-- ================================================================ Deutsch -->
+<article lang="de" hidden>
+<h1>Datenschutzerklärung</h1>
+<p class="muted">Dienst netmon · zuletzt aktualisiert am 14. Oktober 2026 · Übersetzung: maßgeblich ist der italienische Text</p>
+<p class="trial"><strong>Testphase.</strong> netmon wird bis auf Weiteres mit einer kleinen Gruppe von Nutzern getestet. Der Dienst kann Unterbrechungen haben oder sich ändern. Wenn der Test endet, teilen wir es dir per E-Mail mit: die Daten werden innerhalb von 30 Tagen nach dieser Mitteilung gelöscht, vorher kannst du sie mit <em>Meine Daten herunterladen</em> herunterladen.</p>
+
+<h2>1. Wer deine Daten verarbeitet</h2>
+<p>Verantwortlicher: der Betreiber des Dienstes netmon (NetMon Home tool),
+E-Mail <a href="mailto:info.netmonitor@gmail.com">info.netmonitor@gmail.com</a>. Schreib an diese Adresse bei
+Fragen zu deinen Daten oder um deine Rechte auszuüben.</p>
+
+<h2>2. Welche Daten wir verarbeiten</h2>
+<ul>
+<li><strong>Konto</strong>: E-Mail-Adresse, Passwort (nur als Hash gespeichert, niemand kann es lesen),
+Sprache, Datum der Registrierung und der letzten Anmeldung, Bestätigung der E-Mail.</li>
+<li><strong>Benachrichtigungen</strong>: die Kanäle, die du wählst (E-Mail, Telegram-Chat, ntfy-Adresse), und welche Meldungen du erhältst.</li>
+<li><strong>Sitzungen</strong>: Anmeldedatum, Ablauf und Browsertyp (User-Agent) jeder offenen Sitzung.</li>
+<li><strong>Daten der Sonden</strong>, gesendet von den Sonden, die du in deinem Netz installierst:
+Name der Sonde, überwachte Geräte (von dir gewählter Name, IP-Adresse oder Netzwerkname) und Ping-Ergebnisse,
+WLANs (Name, Signal), Status und Datenverkehr der FRITZ!Box und der Repeater (Leitungsgeschwindigkeit, übertragene
+Daten, Anzahl verbundener Geräte, Mesh-Netz mit Namen und Adressen der Geräte), Geschwindigkeitstests, Temperatur und
+Last der Sonde, Ereignisse und Benachrichtigungen.</li>
+<li><strong>Sicherheitsprüfungen</strong>, nur wenn du sie startest oder planst: offene Ports und Dienste auf den
+Geräten, die du auswählst, mit der Risikostufe.</li>
+<li><strong>Technische Daten</strong>: IP-Adresse und Zeitpunkt der Anfragen an den Server, im Systemprotokoll,
+zur Sicherheit (zum Beispiel fehlgeschlagene Anmeldeversuche).</li>
+</ul>
+<p>Die Daten der Sonden können <strong>andere Personen in deinem Haushalt</strong> betreffen (zum Beispiel ein Gerät
+namens „Annas Handy“). Verwende nach Möglichkeit Namen, die keine Personen erkennen lassen, und informiere alle, die dein Netz nutzen.</p>
+<p>Die Zugangsdaten der FRITZ!Box und die Tokens der Sonden bleiben auf der Sonde: der Server erhält sie nicht.
+WLAN-Passwörter, die du über die Seite hinzufügst, laufen nur über den Server, um der Sonde zugestellt zu werden,
+und werden nicht gespeichert.</p>
+
+<h2>3. Zweck und Rechtsgrundlage</h2>
+<table>
+<tr><th>Zweck</th><th>Rechtsgrundlage (Art. 6 DSGVO)</th></tr>
+<tr><td>Bereitstellung des Dienstes: Konto, Statusseite, Verlauf, Benachrichtigungen</td><td>Vertragserfüllung (lit. b)</td></tr>
+<tr><td>Dienst-E-Mails (Bestätigung der Adresse, Einladungen, Wartungshinweise)</td><td>Vertragserfüllung (lit. b)</td></tr>
+<tr><td>Sicherheit des Servers: Zugriffsprotokoll, Begrenzung der Versuche</td><td>Berechtigtes Interesse am Schutz des Dienstes und der Daten (lit. f)</td></tr>
+</table>
+<p>Wir nutzen die Daten nicht für Werbung oder Profilbildung und verkaufen sie nicht. Die Seite verwendet nur technische
+Cookies (Sitzung und Sprache), die für den Betrieb nötig sind: eine Einwilligung ist nicht erforderlich.</p>
+
+<h2>4. Wo die Daten liegen und wer sie erhält</h2>
+<ul>
+<li>Der Dienst nutzt mehrere Server: einen <strong>Anmeldeserver</strong>, auf dem du dich anmeldest und die Administratoren den
+Dienst verwalten, und die <strong>Nutzerserver</strong>. Dein Konto, deine Sonden und ihr Verlauf liegen nur auf dem Server
+deines Kontos; der Anmeldeserver nutzt deine E-Mail, um dich dorthin zu leiten, und speichert keine Sondendaten.</li>
+<li>Server: Google Cloud (Google Cloud EMEA Limited, Irland), mit den Daten in einem Rechenzentrum in der Europäischen Union;
+Google ist Auftragsverarbeiter (Art. 28) gemäß seinen Bedingungen zur Datenverarbeitung (Cloud Data Processing Addendum).</li>
+<li>E-Mail-Versand: Brevo (Sendinblue SAS, Frankreich), mit den Daten in der Europäischen Union; Brevo ist Auftragsverarbeiter (Art. 28) gemäß seinem Vertrag zur Auftragsverarbeitung.</li>
+<li>Nur wenn du sie aktivierst: <strong>Telegram</strong> (Telegram Messenger Inc., außerhalb der EU) und <strong>ntfy</strong>
+(der von dir angegebene ntfy-Dienst, zum Beispiel ntfy.sh in den USA) erhalten den Text der Benachrichtigungen.</li>
+<li>Geschwindigkeitstests: die Sonde führt sie direkt mit Cloudflare (speed.cloudflare.com) über deine Verbindung durch.</li>
+<li>Die Administratoren des Servers sehen deine E-Mail und den Status deiner Sonden (nicht die Messwerte), um den
+Dienst zu verwalten. Derzeit ist der Administrator der Betreiber des Dienstes.</li>
+</ul>
+<p>Die Seite lädt nichts von anderen Websites (nicht einmal Schriftarten): dein Browser spricht nur mit den netmon-Servern.</p>
+
+<h2>5. Sicherheit</h2>
+<p>Verschlüsselte Verbindung (HTTPS), Passwörter und Tokens nur als Hash gespeichert, Begrenzung der Anmeldeversuche,
+Zwei-Faktor-Bestätigung für Administratoren, gelöschte Daten werden in der Datenbank überschrieben.
+Die Festplatte des Servers ist von Google Cloud verschlüsselt. Es werden keine Sicherungskopien der Daten angelegt.</p>
+
+<h2>6. Speicherdauer</h2>
+<table>
+<tr><th>Daten</th><th>Dauer</th></tr>
+<tr><td>Konto, Benachrichtigungen, Sonden</td><td>Bis du das Konto löschst</td></tr>
+<tr><td>Messverlauf und Ereignisse der Sonden</td><td>__NETMON_CONSERVAZIONE_DE__ (änderbar unter Einstellungen → Datenaufbewahrung); höchstens 5000 Ereignisse pro Sonde</td></tr>
+<tr><td>Alle Daten, am Ende des Tests</td><td>Gelöscht innerhalb von 30 Tagen nach der Mitteilung über das Testende</td></tr>
+<tr><td>Sitzungen</td><td>12 Stunden, oder 30 Tage mit „Auf diesem Gerät angemeldet bleiben“</td></tr>
+<tr><td>Verwaltungsprotokoll (enthält die E-Mail bei der Registrierung)</td><td>365 Tage; beim Löschen des Kontos wird die E-Mail entfernt</td></tr>
+<tr><td>Systemprotokoll (IP, Anmeldungen)</td><td>30 Tage</td></tr>
+<tr><td>Sonden ohne Konto („Nur das Konto löschen“)</td><td>Mit ihrem Verlauf gelöscht nach 30 Tagen ohne Kontakt</td></tr>
+</table>
+
+<h2>7. Deine Rechte</h2>
+<ul>
+<li><strong>Auskunft und Datenübertragbarkeit</strong> (Art. 15 und 20): unter <em>Einstellungen → Konto und Backup → Meine Daten herunterladen</em>
+erhältst du sofort eine Datei mit allen Daten, die der Server über dich speichert (JSON und CSV).</li>
+<li><strong>Berichtigung</strong> (Art. 16): Namen, Benachrichtigungen und Einstellungen änderst du auf der Seite; für die E-Mail schreib uns.</li>
+<li><strong>Löschung</strong> (Art. 17): unter <em>Einstellungen → Konto und Backup</em> kannst du das Konto selbst löschen,
+auch zusammen mit allen Daten der Sonden.</li>
+<li><strong>Einschränkung und Widerspruch</strong> (Art. 18 und 21): schreib an die Adresse in Abschnitt 1.</li>
+<li><strong>Beschwerde</strong>: du kannst dich an die italienische Datenschutzbehörde (Garante per la protezione dei dati personali,
+<a href="https://www.garanteprivacy.it">garanteprivacy.it</a>) oder an die Behörde deines Wohnsitzlandes wenden.</li>
+</ul>
+<p>Wir beantworten Anfragen innerhalb eines Monats.</p>
+
+<h2>8. Änderungen</h2>
+<p>Wenn sich diese Erklärung wesentlich ändert, informieren wir dich per E-Mail, bevor die Änderungen gelten.</p>
+</article>
+
+<!-- ================================================================ français -->
+<article lang="fr" hidden>
+<h1>Politique de confidentialité</h1>
+<p class="muted">Service netmon · dernière mise à jour le 14 octobre 2026 · traduction : le texte italien fait foi</p>
+<p class="trial"><strong>Phase d'essai.</strong> netmon est testé avec un petit groupe d'utilisateurs, jusqu'à nouvel ordre. Le service peut avoir des interruptions ou changer. Quand l'essai se termine nous te le disons par email : les données sont supprimées dans les 30 jours suivant cette communication, et avant tu peux les télécharger avec <em>Télécharger mes données</em>.</p>
+
+<h2>1. Qui traite tes données</h2>
+<p>Responsable du traitement : l'exploitant du service netmon (NetMon Home tool),
+email <a href="mailto:info.netmonitor@gmail.com">info.netmonitor@gmail.com</a>. Écris à cette adresse pour toute
+question sur tes données ou pour exercer tes droits.</p>
+
+<h2>2. Quelles données nous traitons</h2>
+<ul>
+<li><strong>Compte</strong> : adresse email, mot de passe (conservé seulement sous forme d'empreinte, personne ne peut le lire),
+langue, date d'inscription et de dernière connexion, confirmation de l'email.</li>
+<li><strong>Notifications</strong> : les canaux que tu choisis (email, chat Telegram, adresse ntfy) et les alertes à recevoir.</li>
+<li><strong>Sessions</strong> : date de connexion, expiration et type de navigateur (user agent) de chaque session ouverte.</li>
+<li><strong>Données des sondes</strong>, envoyées par les sondes que tu installes dans ton réseau :
+nom de la sonde, appareils contrôlés (nom que tu choisis, adresse IP ou nom réseau) et résultats des pings,
+réseaux Wi-Fi (nom, signal), état et trafic de la FRITZ!Box et des répéteurs (débit de la ligne, données échangées,
+nombre d'appareils connectés, réseau mesh avec noms et adresses des appareils), tests de débit, température et
+charge de la sonde, événements et alertes.</li>
+<li><strong>Contrôles de sécurité</strong>, seulement si tu les lances ou les programmes : ports ouverts et services trouvés
+sur les appareils que tu choisis, avec le niveau de risque.</li>
+<li><strong>Données techniques</strong> : adresse IP et heure des requêtes au serveur, dans le journal système,
+pour la sécurité (par exemple les tentatives de connexion échouées).</li>
+</ul>
+<p>Les données des sondes peuvent concerner <strong>d'autres personnes de ton foyer</strong> (par exemple un appareil
+appelé « Téléphone d'Anna »). Utilise si possible des noms qui n'identifient pas les personnes, et informe ceux qui utilisent ton réseau.</p>
+<p>Les identifiants de la FRITZ!Box et les tokens des sondes restent sur la sonde : le serveur ne les reçoit pas.
+Les mots de passe Wi-Fi que tu ajoutes depuis la page passent par le serveur seulement pour être remis
+à la sonde et ne sont pas enregistrés.</p>
+
+<h2>3. Pourquoi et sur quelle base</h2>
+<table>
+<tr><th>Finalité</th><th>Base juridique (art. 6 RGPD)</th></tr>
+<tr><td>Fournir le service : compte, page d'état, historique, alertes</td><td>Exécution du contrat (point b)</td></tr>
+<tr><td>Emails de service (confirmation de l'adresse, invitations, avis de maintenance)</td><td>Exécution du contrat (point b)</td></tr>
+<tr><td>Sécurité du serveur : journal des accès, limites des tentatives</td><td>Intérêt légitime à protéger le service et les données (point f)</td></tr>
+</table>
+<p>Nous n'utilisons pas les données pour la publicité ou le profilage et nous ne les vendons pas. La page n'utilise que des
+cookies techniques (session et langue), nécessaires à son fonctionnement : aucun consentement n'est requis.</p>
+
+<h2>4. Où sont les données et qui les reçoit</h2>
+<ul>
+<li>Le service utilise plusieurs serveurs : un <strong>serveur d'accès</strong>, où tu te connectes et où les administrateurs gèrent le
+service, et les <strong>serveurs des utilisateurs</strong>. Ton compte, tes sondes et leur historique se trouvent uniquement sur le serveur
+de ton compte ; le serveur d'accès utilise ton email pour t'y conduire et ne conserve pas les données des sondes.</li>
+<li>Serveur : Google Cloud (Google Cloud EMEA Limited, Irlande), avec les données dans un centre de données de l'Union européenne ;
+Google agit en tant que sous-traitant (art. 28) selon ses conditions de traitement des données (Cloud Data Processing Addendum).</li>
+<li>Envoi des emails : Brevo (Sendinblue SAS, France), avec les données dans l'Union européenne ; Brevo agit en tant que sous-traitant (art. 28) selon son accord de traitement des données.</li>
+<li>Seulement si tu les actives : <strong>Telegram</strong> (Telegram Messenger Inc., hors de l'UE) et <strong>ntfy</strong>
+(le service ntfy que tu indiques, par exemple ntfy.sh aux États-Unis) reçoivent le texte des alertes.</li>
+<li>Tests de débit : la sonde les fait directement avec Cloudflare (speed.cloudflare.com), depuis ta connexion.</li>
+<li>Les administrateurs du serveur voient ton email et l'état de tes sondes (pas les mesures) pour gérer le
+service. Aujourd'hui l'administrateur est l'exploitant du service.</li>
+</ul>
+<p>La page ne charge rien depuis d'autres sites (pas même les polices) : ton navigateur ne parle qu'aux serveurs netmon.</p>
+
+<h2>5. Sécurité</h2>
+<p>Connexion chiffrée (HTTPS), mots de passe et tokens conservés seulement sous forme d'empreinte, limites des tentatives de
+connexion, vérification en deux étapes pour les administrateurs, données supprimées écrasées dans la base de données.
+Le disque du serveur est chiffré par Google Cloud. Aucune copie de sauvegarde des données n'est faite.</p>
+
+<h2>6. Durée de conservation</h2>
+<table>
+<tr><th>Données</th><th>Durée</th></tr>
+<tr><td>Compte, notifications, sondes</td><td>Jusqu'à la suppression du compte</td></tr>
+<tr><td>Historique des mesures et événements des sondes</td><td>__NETMON_CONSERVAZIONE_FR__ (modifiable dans Paramètres → Conservation des données) ; au maximum 5000 événements par sonde</td></tr>
+<tr><td>Toutes les données, à la fin de l'essai</td><td>Supprimées dans les 30 jours suivant l'annonce de la fin de l'essai</td></tr>
+<tr><td>Sessions</td><td>12 heures, ou 30 jours avec « Se souvenir de moi sur cet appareil »</td></tr>
+<tr><td>Journal administratif (contient l'email à l'inscription)</td><td>365 jours ; à la suppression du compte l'email est retiré</td></tr>
+<tr><td>Journal système (IP, connexions)</td><td>30 jours</td></tr>
+<tr><td>Sondes restées sans compte (« Supprimer seulement le compte »)</td><td>Supprimées avec leur historique après 30 jours sans contact</td></tr>
+</table>
+
+<h2>7. Tes droits</h2>
+<ul>
+<li><strong>Accès et portabilité</strong> (art. 15 et 20) : dans <em>Réglages → Compte et sauvegarde → Télécharger mes données</em>
+tu obtiens tout de suite un fichier avec toutes les données que le serveur conserve sur toi (JSON et CSV).</li>
+<li><strong>Rectification</strong> (art. 16) : noms, notifications et réglages se modifient depuis la page ; pour l'email, écris-nous.</li>
+<li><strong>Effacement</strong> (art. 17) : dans <em>Réglages → Compte et sauvegarde</em> tu peux supprimer toi-même le compte,
+aussi avec toutes les données des sondes.</li>
+<li><strong>Limitation et opposition</strong> (art. 18 et 21) : écris à l'adresse de la section 1.</li>
+<li><strong>Réclamation</strong> : tu peux t'adresser à l'autorité italienne de protection des données (Garante per la protezione dei dati personali,
+<a href="https://www.garanteprivacy.it">garanteprivacy.it</a>) ou à l'autorité du pays où tu vis.</li>
+</ul>
+<p>Nous répondons aux demandes dans un délai d'un mois.</p>
+
+<h2>8. Modifications</h2>
+<p>Si cette politique change de manière importante, nous te le dirons par email avant que les modifications s'appliquent.</p>
+</article>
+</main>
+<script>
+(function () {
+  const LANGS = ["it", "en", "de", "fr"];
+  const sel = document.getElementById("lang");
+  const q = new URLSearchParams(location.search).get("lang");
+  const fromServer = document.documentElement.dataset.lang;
+  const fromBrowser = (navigator.language || "it").slice(0, 2).toLowerCase();
+  function show(lang) {
+    if (!LANGS.includes(lang)) lang = "it";
+    document.querySelectorAll("article[lang]").forEach(a => { a.hidden = a.lang !== lang; });
+    document.documentElement.lang = lang;
+    sel.value = lang;
+    const h = document.querySelector(`article[lang="${lang}"] h1`);
+    if (h) document.title = h.textContent + " · netmon";
+  }
+  show(LANGS.includes(q) ? q : LANGS.includes(fromServer) ? fromServer : fromBrowser);
+  sel.addEventListener("change", () => {
+    show(sel.value);
+    const u = new URL(location.href); u.searchParams.set("lang", sel.value);
+    history.replaceState(null, "", u);
+  });
+})();
+</script>
+</body>
+</html>

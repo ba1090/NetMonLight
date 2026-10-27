@@ -1,0 +1,43 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Aggiornamento dei pacchetti della sonda, avviato da netmon (pagina locale o server).
+# Installazione: sudo install -m 755 -o root -g root netprobe-upgrade /usr/local/sbin/
+# Gira come root in un'unità systemd separata; scrive log e stato in /var/lib/netprobe-sys,
+# cartella di root leggibile dalla sonda (mai nella cartella della sonda, scrivibile dal servizio:
+# lì un collegamento simbolico potrebbe far sovrascrivere a root un file di sistema).
+set -u
+umask 022
+STATE=/var/lib/netprobe-sys
+LOG="$STATE/upgrade.log"
+STATUS="$STATE/upgrade.status"
+STARTED=$(date +%s)
+
+write_status() {   # $1 stato, $2 fine, $3 codice di uscita
+  rm -f "$STATUS.tmp"
+  printf '{"state":"%s","started":%s,"finished":%s,"exit":%s}\n' \
+    "$1" "$STARTED" "${2:-null}" "${3:-null}" > "$STATUS.tmp"
+  chmod 644 "$STATUS.tmp"
+  mv -f "$STATUS.tmp" "$STATUS"
+}
+
+install -d -m 755 -o root -g root "$STATE"
+rm -f "$LOG"
+: > "$LOG"
+chmod 644 "$LOG"
+write_status running
+
+export DEBIAN_FRONTEND=noninteractive
+{
+  echo "== $(date '+%d/%m/%Y %H:%M:%S') · apt-get update =="
+  apt-get update &&
+  echo "== apt-get upgrade ==" &&
+  apt-get -y --with-new-pkgs -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+} >> "$LOG" 2>&1
+RC=$?
+
+if [ -f /var/run/reboot-required ]; then
+  echo "== Per completare l'aggiornamento è consigliato un riavvio ==" >> "$LOG"
+fi
+echo "== Fine: codice $RC ==" >> "$LOG"
+if [ "$RC" -eq 0 ]; then write_status ok "$(date +%s)" "$RC"; else write_status error "$(date +%s)" "$RC"; fi
+exit "$RC"

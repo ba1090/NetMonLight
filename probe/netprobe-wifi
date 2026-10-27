@@ -1,0 +1,343 @@
+#!/usr/bin/python3
+# netmon versione 1.1.20261026-104239
+"""Reti Wi-Fi della sonda (NetworkManager), su richiesta del proprietario dalla pagina di stato.
+
+Installazione: sudo install -m 755 -o root -g root netprobe-wifi /usr/local/sbin/
+Gira come root in un'unità systemd separata, avviata dalla sonda (utente netprobe) dopo aver
+scritto la richiesta in /var/lib/netprobe/wifi/request.json. La richiesta contiene la password
+della rete: viene letta una volta e cancellata subito, e non finisce mai nel registro. Qui non ci
+si fida del contenuto: ogni campo viene controllato.
+
+Azioni:
+  add     aggiunge (o aggiorna) una rete conosciuta: la sonda la usa quando la trova
+  switch  aggiunge la rete e ci passa subito; se non si collega o da lì il server non risponde,
+          torna alla rete di prima e toglie quella nuova
+  remove  toglie una rete conosciuta (mai quella in uso)
+
+Esito in /var/lib/netprobe-sys/wifi.status (json), registro in wifi.log.
+"""
+import json
+import os
+import re
+import shutil
+import socket
+import stat
+import subprocess
+import sys
+import time
+import uuid as uuidlib
+
+REQUEST = "/var/lib/netprobe/wifi/request.json"      # scritto dalla sonda: mai considerato fidato
+SYS = "/var/lib/netprobe-sys"                         # di root, leggibile dalla sonda
+STATUS = os.path.join(SYS, "wifi.status")
+LOG = os.path.join(SYS, "wifi.log")
+CONN_DIR = "/etc/NetworkManager/system-connections"
+WAIT_UP = 45          # secondi per agganciarsi alla rete nuova
+WAIT_SERVER = 60      # secondi perché il server risponda dalla rete nuova (DHCP compreso)
+PRIORITY = 10         # le reti aggiunte da qui vincono sulla rete di partenza quando ci sono entrambe
+HOST_RE = re.compile(r"^[A-Za-z0-9.\-:\[\]]{1,253}$")
+
+state = {"state": "running", "started": time.time(), "finished": None, "action": "", "ssid": "", "message": ""}
+
+
+def write_status():
+    tmp = STATUS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, STATUS)
+
+
+def say(text):
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(time.strftime("%H:%M:%S ") + text + "\n")
+
+
+def finish(ok, message):
+    state.update(state="ok" if ok else "error", finished=time.time(), message=message)
+    say(("== Fine: " if ok else "== Errore: ") + message + " ==")
+    write_status()
+    sys.exit(0 if ok else 1)
+
+
+def nmcli(*args, timeout=30):
+    try:
+        return subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(args, 1, "", str(exc))
+
+
+def fields(line):
+    """Campi di una riga di `nmcli -t`: separati da ':', con '\\:' e '\\\\' come caratteri."""
+    out, cur, i = [], "", 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and i + 1 < len(line):
+            cur += line[i + 1]
+            i += 2
+            continue
+        if ch == ":":
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+        i += 1
+    out.append(cur)
+    return out
+
+
+def wifi_connections():
+    """Profili Wi-Fi salvati: uuid, nome, file, attivo, SSID."""
+    r = nmcli("-t", "-f", "UUID,TYPE,ACTIVE,FILENAME", "connection", "show")
+    conns = []
+    for line in r.stdout.splitlines():
+        f = fields(line)
+        if len(f) < 4 or f[1] != "802-11-wireless":
+            continue
+        ssid = nmcli("-g", "802-11-wireless.ssid", "connection", "show", "uuid", f[0]).stdout.rstrip("\n")
+        conns.append({"uuid": f[0], "active": f[2] == "yes", "file": f[3], "ssid": fields(ssid)[0] if ssid else ""})
+    return conns
+
+
+def load_request():
+    """Legge la richiesta senza seguire collegamenti e la cancella in ogni caso."""
+    try:
+        fd = os.open(REQUEST, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > 4096:
+                raise ValueError("richiesta non valida")
+            with os.fdopen(fd, encoding="utf-8") as f:
+                fd = None
+                return json.load(f)
+        finally:
+            if fd is not None:
+                os.close(fd)
+    except (OSError, ValueError) as exc:
+        finish(False, f"richiesta illeggibile ({exc.__class__.__name__})")
+    finally:
+        try:
+            os.remove(REQUEST)
+        except OSError:
+            pass
+
+
+def check(req):
+    if not isinstance(req, dict):
+        finish(False, "richiesta non valida")
+    action, ssid, psk = req.get("action"), req.get("ssid"), req.get("psk") or ""
+    if action not in ("add", "switch", "remove"):
+        finish(False, "azione non valida")
+    if not isinstance(ssid, str) or not 1 <= len(ssid.encode("utf-8")) <= 32 \
+            or any(ord(c) < 32 or ord(c) == 127 for c in ssid):
+        finish(False, "nome della rete non valido")
+    if not isinstance(psk, str) or not (psk == "" or 8 <= len(psk) <= 63 and all(32 <= ord(c) <= 126 for c in psk)
+                                        or re.fullmatch(r"[0-9A-Fa-f]{64}", psk)):
+        finish(False, "password della rete non valida (da 8 a 63 caratteri)")
+    host, port = str(req.get("server_host") or ""), req.get("server_port")
+    if action == "switch" and (not HOST_RE.match(host) or not isinstance(port, int) or not 0 < port < 65536):
+        finish(False, "indirizzo del server non valido")
+    return action, ssid, psk, bool(req.get("hidden")), host, port
+
+
+def scan(ssid):
+    """Cerca la rete con una scansione: (trovata, sicurezza, descrizione). Prende il segnale più forte."""
+    r = nmcli("-t", "-f", "SSID,SECURITY,CHAN,FREQ,SIGNAL", "device", "wifi", "list", "--rescan", "yes", timeout=40)
+    best = None
+    for line in r.stdout.splitlines():
+        f = fields(line)
+        if len(f) < 5 or f[0] != ssid:
+            continue
+        try:
+            signal = int(f[4])
+        except ValueError:
+            signal = 0
+        if best is None or signal > best[3]:
+            best = (f[1], f[2], f[3], signal)
+    if best is None:
+        return False, "", ""
+    sec, chan, freq, signal = best
+    banda = "5 GHz" if freq.split()[0].isdigit() and int(freq.split()[0]) >= 4900 else "2,4 GHz"
+    return True, sec, f"vista sul canale {chan} ({banda}), segnale {signal}%"
+
+
+def key_mgmt(sec, psk):
+    """Sicurezza del profilo secondo quella vista nella scansione: WPA2 (o WPA2/WPA3 insieme) con
+    wpa-psk, solo WPA3 con sae. Sconosciuta (rete non vista): wpa-psk se c'è una password."""
+    sec = (sec or "").upper()
+    if not psk:
+        return None
+    if "WPA3" in sec and "WPA2" not in sec and "WPA1" not in sec:
+        return "sae"
+    return "wpa-psk"
+
+
+def why_not_seen():
+    """Motivi possibili per cui la scansione non trova la rete, con quello che si sa della sonda."""
+    def out(*cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+    motivi = ["è troppo lontana o spenta", "è nascosta (spunta «Rete nascosta»)"]
+    iw = shutil.which("iw") or next((x for x in ("/usr/sbin/iw", "/sbin/iw") if os.path.exists(x)), None)
+    bands = out(iw, "list") if iw else ""
+    if bands and not re.search(r"\b5[0-9]{3}(\.0)? MHz", bands):
+        motivi.append("trasmette solo a 5 GHz, ma la scheda Wi-Fi di questa sonda va solo a 2,4 GHz")
+    reg = out(iw, "reg", "get") if iw else ""
+    m = re.search(r"country (\w\w):", reg)
+    if m and m.group(1) in ("00", "US"):
+        motivi.append(f"usa i canali 12 o 13, non permessi dal paese Wi-Fi della sonda ({m.group(1)}): "
+                      "impostalo con «sudo raspi-config» → Localisation → WLAN Country")
+    return " · ".join(motivi)
+
+
+def kf(value):
+    """Valore per un keyfile di NetworkManager (formato GKeyFile)."""
+    return value.replace("\\", "\\\\").replace(" ", "\\s")
+
+
+def keyfile(con_uuid, ssid, psk, hidden, mgmt="wpa-psk"):
+    # SSID con ';' scritto come elenco di byte, come fa NetworkManager stesso
+    ssid_value = "".join(f"{b};" for b in ssid.encode("utf-8")) if ";" in ssid else kf(ssid)
+    lines = ["[connection]", f"id={kf('netmon · ' + ssid)}", f"uuid={con_uuid}", "type=wifi",
+             "autoconnect=true", f"autoconnect-priority={PRIORITY}", "",
+             "[wifi]", "mode=infrastructure", f"ssid={ssid_value}"]
+    if hidden:
+        lines.append("hidden=true")
+    if psk:
+        lines += ["", "[wifi-security]", f"key-mgmt={mgmt}", f"psk={kf(psk)}"]
+    lines += ["", "[ipv4]", "method=auto", "", "[ipv6]", "addr-gen-mode=default", "method=auto", ""]
+    return "\n".join(lines)
+
+
+def write_profile(path, text):
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(path + ".tmp", path)
+    r = nmcli("connection", "load", path)
+    if r.returncode != 0:
+        say("NetworkManager non accetta il profilo: " + (r.stderr.strip() or r.stdout.strip())[:200])
+        return False
+    return True
+
+
+def server_reachable(host, port, wait):
+    host = host.strip("[]")
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=5):
+                return True
+        except OSError:
+            time.sleep(3)
+    return False
+
+
+def main():
+    os.makedirs(SYS, mode=0o755, exist_ok=True)
+    with open(LOG, "w", encoding="utf-8"):
+        pass
+    os.chmod(LOG, 0o644)
+    write_status()
+    action, ssid, psk, hidden, host, port = check(load_request())
+    state.update(action=action, ssid=ssid)
+    write_status()
+    say(f"== {time.strftime('%d/%m/%Y')} · rete Wi-Fi «{ssid}»: "
+        + {"add": "aggiunta", "switch": "passaggio immediato", "remove": "rimozione"}[action] + " ==")
+
+    if nmcli("-t", "-f", "RUNNING", "general").stdout.strip() != "running":
+        finish(False, "NetworkManager non è attivo su questa sonda")
+    if not any(fields(l)[1:2] == ["wifi"] for l in nmcli("-t", "-f", "DEVICE,TYPE", "device").stdout.splitlines()):
+        finish(False, "la sonda non ha una scheda Wi-Fi")
+    conns = wifi_connections()
+    same = [c for c in conns if c["ssid"] == ssid]
+
+    if action == "remove":
+        if not same:
+            finish(False, f"«{ssid}» non è tra le reti conosciute")
+        if any(c["active"] for c in same):
+            finish(False, f"«{ssid}» è la rete in uso: non si può togliere")
+        for c in same:
+            r = nmcli("connection", "delete", "uuid", c["uuid"])
+            if r.returncode != 0:
+                finish(False, "rimozione non riuscita: " + (r.stderr.strip() or "errore di NetworkManager")[:200])
+        finish(True, f"rete «{ssid}» tolta")
+
+    if any(c["active"] for c in same):
+        finish(False, f"«{ssid}» è già la rete in uso")
+    path = os.path.join(CONN_DIR, f"netmon-{ssid.encode('utf-8').hex()}.nmconnection")
+    old_text = None
+    if os.path.isfile(path) and not os.path.islink(path):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            old_text = f.read()
+    m = re.search(r"^uuid=([0-9a-f-]{36})$", old_text or "", re.M)
+    con_uuid = m.group(1) if m else str(uuidlib.uuid4())
+    others = [c for c in same if c["uuid"] != con_uuid]          # stessa rete salvata da altri (es. all'installazione)
+
+    # la rete si vede da qui? (canale, banda, sicurezza): l'esito lo dice subito invece di «aggiunta» e basta
+    say("Ricerca della rete")
+    seen, sec, where = scan(ssid)
+    if seen:
+        say(f"«{ssid}» {where}, sicurezza {sec or 'nessuna'}")
+        if sec and sec != "--" and not psk:
+            finish(False, f"«{ssid}» è protetta ({sec}): scrivi la sua password")
+        if sec in ("", "--") and psk:
+            say("Rete aperta: la password non serve e non viene salvata")
+            psk = ""
+    else:
+        say(f"«{ssid}» non trovata nella scansione")
+    mgmt = key_mgmt(sec, psk)
+
+    if not write_profile(path, keyfile(con_uuid, ssid, psk, hidden, mgmt or "wpa-psk")):
+        finish(False, "NetworkManager non accetta la rete (controlla nome e password)")
+
+    if action == "add":
+        for c in others:                                           # una sola voce per rete
+            nmcli("connection", "delete", "uuid", c["uuid"])
+        if seen:
+            finish(True, f"rete «{ssid}» aggiunta ({where}): la sonda la userà quando non trova la rete attuale. "
+                         "La password si verifica solo collegandosi: per provarla usa «Collegati subito»")
+        finish(True, f"rete «{ssid}» aggiunta, ma ora la sonda non la vede. Forse {why_not_seen()}")
+
+    # switch: si passa subito, con ritorno alla rete di prima se qualcosa non va
+    prev = next((c["uuid"] for c in conns if c["active"]), None)
+
+    def rollback(reason):
+        if old_text is None:
+            nmcli("connection", "delete", "uuid", con_uuid)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        else:
+            write_profile(path, old_text)
+        if prev:
+            say("Ritorno alla rete precedente")
+            nmcli("--wait", str(WAIT_UP), "connection", "up", "uuid", prev, timeout=WAIT_UP + 15)
+        finish(False, reason + ("; la sonda è tornata alla rete precedente" if prev else ""))
+
+    say("Collegamento alla rete nuova")
+    r = nmcli("--wait", str(WAIT_UP), "connection", "up", "uuid", con_uuid, timeout=WAIT_UP + 15)
+    if r.returncode != 0:
+        say("NetworkManager: " + (r.stderr.strip() or r.stdout.strip())[:300])
+        rollback(f"non si collega a «{ssid}»: " + ("password sbagliata o segnale troppo debole" if seen
+                                                     else f"la sonda non la vede. Forse {why_not_seen()}"))
+    say(f"Collegata: prova del server {host}:{port}")
+    if not server_reachable(host, port, WAIT_SERVER):
+        rollback(f"collegata a «{ssid}», ma da lì il server non risponde")
+    for c in others:
+        nmcli("connection", "delete", "uuid", c["uuid"])
+    finish(True, f"sonda collegata a «{ssid}»")
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        sys.exit("Serve root (viene avviato dalla sonda con systemd-run).")
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 - l'esito deve arrivare comunque alla sonda
+        finish(False, f"errore imprevisto: {exc.__class__.__name__}")

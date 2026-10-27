@@ -1,0 +1,29 @@
+# netmon versione 1.1.20261026-104239
+[Unit]
+Description=netmon - server di monitoraggio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Il servizio non è proprietario dei suoi programmi: /opt/netmon e l'ambiente Python sono di root
+# (installa-server.sh), a netmon appartengono solo /opt/netmon/data e il file .env.
+User=netmon
+WorkingDirectory=/opt/netmon
+EnvironmentFile=/opt/netmon/.env
+# Un solo processo; niente registro di ogni richiesta (lo fa già Caddy se serve) e niente websocket
+ExecStart=/opt/netmon/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --no-access-log --ws none --timeout-keep-alive 65
+# Meno memoria con i thread del database (allocatore di glibc)
+Environment=MALLOC_ARENA_MAX=2
+# Verifiche scrypt contemporanee: ognuna tiene ~32 MB. Tre slot stanno bene in 384M.
+Environment=SCRYPT_SLOTS=3
+# File e cartelle creati dal servizio leggibili solo dall'utente netmon: stato, database
+# eventi e pacchetti caricati contengono nomi dispositivo, IP, MAC e hostname.
+UMask=0077
+Restart=always
+RestartSec=5
+TasksMax=256
+# Con SCRYPT_SLOTS=3 servono ~96 MB per gli hash piu' il resto del processo
+MemoryMax=384M
+
+[Install]
+WantedBy=multi-user.target

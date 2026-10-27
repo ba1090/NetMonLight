@@ -1,0 +1,17 @@
+# netmon versione 1.1.20261026-104239
+# All'avvio della VM riarma il timer della finestra di rollback (il timer di systemd-run è
+# transitorio e si perde con il riavvio); se la scadenza è già passata fa subito il rollback.
+# Installazione: sudo install -m 644 -o root -g root netmon-vm-rollback-boot.service /etc/systemd/system/
+#                sudo systemctl enable netmon-vm-rollback-boot.service
+[Unit]
+Description=netmon - finestra di rollback dopo il riavvio della VM
+After=netmon-server.service network-online.target
+ConditionPathExists=/var/lib/netmon-vm/rollback.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/netmon-vm-rollback rearm
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# «Firma NetMon» per il Mac: avvia il programma con la pagina nel browser (lo stesso di Windows,
+# compilato da tools/firma/build.sh) adatto a questo Mac. Se non c'è (per esempio nell'app che sta
+# dentro lo zip del pacchetto, che non porta gli eseguibili), usa le finestre di sistema di
+# firma-netmon-classic: stessa chiave, stessa cartella, stesse funzioni.
+D="$(cd "$(dirname "$0")" && pwd)"
+case "$(uname -m)" in
+  arm64) B="$D/firma-netmon-arm64" ;;
+  *)     B="$D/firma-netmon-amd64" ;;
+esac
+# il programma con la pagina richiede macOS 11 (Big Sur) o successivo
+major=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)
+[ -x "$B" ] && [ "${major:-0}" -ge 11 ] && exec "$B"
+exec /bin/bash "$D/firma-netmon-classic"

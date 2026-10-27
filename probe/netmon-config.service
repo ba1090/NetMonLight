@@ -1,0 +1,24 @@
+# netmon versione 1.1.20261026-104239
+[Unit]
+Description=netmon - pagina web di configurazione della sonda
+# Parte solo quando qualcuno apre la pagina (netmon-config.socket) e si chiude da sola dopo
+# 10 minuti senza richieste: da ferma non occupa memoria.
+Requires=netmon-config.socket
+After=netmon-config.socket
+
+[Service]
+# Avvio con i moduli già compilati (più rapido sul Raspberry Pi Zero)
+ExecStart=/opt/netprobe/venv/bin/python -c "import sys; sys.path.insert(0, '/opt/netprobe'); import config_web; config_web.main()"
+Environment=PROBE_CONFIG=/etc/netprobe/config.yaml
+Environment=WEB_PORT=8080
+Environment=IDLE_MINUTES=10
+# Password obbligatoria: file con una riga WEB_PASSWORD=... (lo crea installa-sonda.sh).
+# Senza, la pagina si apre ma spiega solo come impostarla.
+EnvironmentFile=-/etc/netprobe/web.env
+Restart=on-failure
+RestartSec=5
+MemoryMax=64M
+TasksMax=32
+Nice=5
+User=netprobe
+Group=netprobe

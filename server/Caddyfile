@@ -1,0 +1,24 @@
+# netmon versione 1.1.20261026-104239
+# /etc/caddy/Caddyfile — Caddy ottiene e rinnova da solo il certificato HTTPS
+monitor.tuodominio.it {
+    # pagina e dati compressi: circa 5 volte meno da scaricare
+    encode zstd gzip
+
+    # Tetto alla dimensione del corpo della richiesta, imposto qui e non solo in Python.
+    # Il controllo in app.py legge Content-Length, che un richiedente puo' non inviare affatto
+    # (richieste chunked): senza questo limite, un corpo enorme verrebbe letto in memoria
+    # dal server prima di essere rifiutato.
+    request_body {
+        max_size 10MB
+    }
+
+    # HTTPS gia' attivo, quindi si puo' dichiarare al browser di non tornare mai su http://.
+    # max-age di un anno, come da igiene di sicurezza. to includeSubDomains solo se il
+    # dominio non ospita altri siti su sotto-domini.
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+
+    reverse_proxy 127.0.0.1:8000
+}

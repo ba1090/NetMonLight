@@ -1,0 +1,15 @@
+# netmon versione 1.1.20261026-104239
+# Dipendenze bloccate a una versione esatta: con >= una nuova versione installata in
+# automatico poteva cambiare il comportamento del server senza che nessuno lo decidesse.
+# Se un aggiornamento serve davvero, si modifica questo file insieme a VERSION e si ripetono i controlli.
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+# QR code per attivare l'app di autenticazione (facoltativo: senza, la chiave si inserisce a mano)
+segno==1.6.6
+# Cifratura dei file di trasferimento degli utenti (AES-256-GCM)
+cryptography==50.0.2
+# NOTA: queste sono le dipendenze dirette. Quelle transitive (starlette, pydantic, anyio e le
+# librerie di uvicorn[standard]) restano risolte da pip, quindi non sono bloccate a una versione.
+# Per bloccare anche quelle serve un file con gli hash di ogni pacchetto, da generare sulla macchina
+# di destinazione con:  pip install pip-tools && pip-compile --generate-hashes requirements.txt
+# e poi installare con  pip install --require-hashes -r requirements.txt

@@ -1,0 +1,34 @@
+# netmon versione 1.1.20261026-104239
+# Copia in /etc/netprobe/config.yaml e personalizza
+server_url: https://vm1.netmonhome.net/api/report
+token: "INCOLLA-QUI-LO-STESSO-API_TOKEN-DEL-SERVER"
+probe_name: casa
+config_poll: 60     # ogni quanto chiedere al server se ci sono modifiche (0 = disattivato)
+
+interval: 60        # secondi tra un ciclo e l'altro
+ping_count: 2       # ping per dispositivo (basta 1 risposta)
+ping_timeout: 1     # secondi di attesa per ogni ping
+ping_parallel: 2    # ping contemporanei (1 = uno alla volta, a rotazione)
+
+# --- soglie degli alert (modificabili anche dalla pagina web) ---
+fail_threshold: 3            # ping falliti prima dell'alert su un dispositivo
+alert_mode: proporzionale    # "proporzionale" (moltiplica l'intervallo) oppure "fisso"
+stale_factor: 1.5            # sonda gialla dopo 1,5 intervalli
+offline_factor: 3            # sonda rossa (alert critico) dopo 3 intervalli
+stale_seconds: 90            # usati solo con alert_mode: fisso
+offline_seconds: 180
+
+# nome: indirizzo IP o hostname
+devices:
+  router: 192.168.1.1
+  switch: 192.168.1.2
+  access-point: 192.168.1.3
+  nas: 192.168.1.10
+  stampante: 192.168.1.20
+
+# --- FRITZ!Box (facoltativo, modificabile anche dalla pagina locale) ---
+fritz_enabled: false
+traffic_interval: 30     # secondi tra due campioni di traffico (0 = disattivato)
+fritz_host: 192.168.178.1
+fritz_user: netmon
+fritz_password: ""

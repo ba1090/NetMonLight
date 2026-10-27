@@ -1,0 +1,33 @@
+# netmon versione 1.1.20261026-104239
+[Unit]
+Description=netmon - sonda di rete
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Ambiente Python della sonda (con fritzconnection); usa anche i pacchetti di sistema
+ExecStart=/opt/netprobe/venv/bin/python /opt/netprobe/probe.py
+Environment=PROBE_CONFIG=/etc/netprobe/config.yaml
+# Crea /var/lib/netprobe (buffer delle misure e cache del FRITZ!Box) con i permessi giusti
+StateDirectory=netprobe
+# buffer, comandi e cache del FRITZ!Box: solo per l'utente della sonda (e root)
+StateDirectoryMode=0750
+UMask=0077
+Environment=PROBE_BUFFER=/var/lib/netprobe/buffer.jsonl
+# Meno memoria con più thread (allocatore di glibc)
+Environment=MALLOC_ARENA_MAX=2
+# Solo per inviare i ping direttamente dal programma, senza avviare il comando ping ogni volta
+AmbientCapabilities=CAP_NET_RAW
+Restart=always
+# Limiti di sicurezza: se il processo esagera viene fermato e riavviato, il sistema resta libero
+MemoryMax=96M
+TasksMax=32
+Nice=5
+RestartSec=10
+User=netprobe
+Group=netprobe
+# Accesso a vcgencmd (alimentazione e temperatura, solo su Raspberry Pi; altrove è innocuo)
+SupplementaryGroups=video
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,312 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# «Firma NetMon»: firma i pacchetti netmon.zip sul Mac dell'autore, con un doppio clic.
+#
+# La chiave privata di rilascio non lascia mai questo Mac: sta in
+# ~/Library/Application Support/NetMon Firma, cifrata con una password (AES-256). Le VM hanno solo la
+# chiave pubblica (server/release-key.pub nel pacchetto, installata in /usr/local/share/netmon) e
+# installano dal pannello /admin solo i pacchetti con una firma valida: chi entrasse nel pannello
+# non potrebbe far girare codice come root sulle VM né sulle sonde.
+#
+# Usa solo ciò che c'è già in macOS: /usr/bin/openssl (ECDSA P-256 con SHA-256), unzip, osascript per
+# le finestre. Compatibile con il bash 3.2 di macOS. Le stesse operazioni da Terminale:
+#   firma:     openssl dgst -sha256 -sign release-signing.key -out sig.der netmon.zip
+#              openssl base64 -A -in sig.der > netmon.zip.sig
+#   verifica:  openssl dgst -sha256 -verify release-key.pub -signature sig.der netmon.zip
+set -u
+umask 077
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin:$PATH
+TITLE="Firma NetMon"
+DIR="$HOME/Library/Application Support/NetMon Firma"
+KEY="$DIR/release-signing.key"        # chiave privata, cifrata con la password
+PUB="$DIR/release-key.pub"            # chiave pubblica (va nel repository: server/release-key.pub)
+MINPASS=10
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/firma-netmon.XXXXXX") || exit 1
+trap 'rm -rf "$TMP"' EXIT
+
+# ------------------------------------------------------------------ finestre (osascript)
+# I testi passano come argomenti, mai dentro lo script AppleScript: niente problemi di virgolette.
+as_run() { osascript - "$@" 2>/dev/null; }
+
+say_box() {   # $1 testo, $2 icona (note | caution | stop)
+  as_run "$TITLE" "$1" "${2:-note}" <<'AS' >/dev/null
+on run argv
+  activate
+  set ic to note
+  if item 3 of argv is "caution" then set ic to caution
+  if item 3 of argv is "stop" then set ic to stop
+  display dialog (item 2 of argv) with title (item 1 of argv) buttons {"OK"} default button "OK" with icon ic
+end run
+AS
+}
+
+ask_yes() {   # $1 testo, $2 pulsante di conferma → 0 se confermato
+  local r
+  r=$(as_run "$TITLE" "$1" "$2" <<'AS'
+on run argv
+  activate
+  try
+    set b to button returned of (display dialog (item 2 of argv) with title (item 1 of argv) buttons {"Annulla", item 3 of argv} default button (item 3 of argv) cancel button "Annulla" with icon caution)
+    return b
+  on error
+    return ""
+  end try
+end run
+AS
+)
+  [ "$r" = "$2" ]
+}
+
+ask_pass() {   # $1 testo → password su stdout (vuoto = annullato)
+  as_run "$TITLE" "$1" <<'AS'
+on run argv
+  activate
+  try
+    return text returned of (display dialog (item 2 of argv) with title (item 1 of argv) default answer "" with hidden answer buttons {"Annulla", "OK"} default button "OK" cancel button "Annulla")
+  on error
+    return ""
+  end try
+end run
+AS
+}
+
+choose_one() {   # $1 testo, poi le voci → voce scelta (vuoto = annullato)
+  as_run "$TITLE" "$@" <<'AS'
+on run argv
+  activate
+  set voci to items 3 thru -1 of argv
+  set r to choose from list voci with title (item 1 of argv) with prompt (item 2 of argv) default items {item 1 of voci}
+  if r is false then return ""
+  return item 1 of r
+end run
+AS
+}
+
+choose_file() {   # $1 testo, $2 tipo ("zip" o "") → percorso (vuoto = annullato)
+  as_run "$1" "$2" <<'AS'
+on run argv
+  activate
+  try
+    if item 2 of argv is "zip" then
+      return POSIX path of (choose file with prompt (item 1 of argv) of type {"public.zip-archive"})
+    end if
+    return POSIX path of (choose file with prompt (item 1 of argv))
+  on error
+    return ""
+  end try
+end run
+AS
+}
+
+choose_folder() {   # $1 testo → cartella (vuoto = annullato)
+  as_run "$1" <<'AS'
+on run argv
+  activate
+  try
+    return POSIX path of (choose folder with prompt (item 1 of argv))
+  on error
+    return ""
+  end try
+end run
+AS
+}
+
+# ------------------------------------------------------------------ chiavi
+fingerprint() {   # impronta come la mostrano la VM e il pannello: «abcd ef01 2345 6789»
+  openssl pkey -pubin -in "$1" -outform DER 2>/dev/null | shasum -a 256 | cut -c1-16 | sed 's/..../& /g;s/ $//'
+}
+
+new_password() {   # chiede due volte una password nuova → stdout (vuoto = annullato)
+  local p1 p2
+  while :; do
+    p1=$(ask_pass "Scegli la password che protegge la chiave di rilascio (almeno $MINPASS caratteri).
+
+Senza questa password la chiave non si può usare: annotala in un posto sicuro.")
+    [ -n "$p1" ] || return 0
+    if [ ${#p1} -lt $MINPASS ]; then say_box "La password deve avere almeno $MINPASS caratteri." caution; continue; fi
+    p2=$(ask_pass "Scrivi di nuovo la stessa password.")
+    [ -n "$p2" ] || return 0
+    [ "$p1" = "$p2" ] && { printf '%s' "$p1"; return 0; }
+    say_box "Le due password non coincidono: riprova." caution
+  done
+}
+
+publish_pub() {   # copia la chiave pubblica sulla Scrivania e negli appunti
+  cp "$PUB" "$HOME/Desktop/release-key.pub" 2>/dev/null && chmod 644 "$HOME/Desktop/release-key.pub"
+  pbcopy < "$PUB" 2>/dev/null
+}
+
+create_key() {
+  local pass
+  pass=$(new_password)
+  [ -n "$pass" ] || return 0
+  mkdir -p "$DIR" && chmod 700 "$DIR" || { say_box "Non riesco a creare la cartella $DIR." stop; return 1; }
+  if ! openssl ecparam -name prime256v1 -genkey -noout 2>"$TMP/err" \
+       | NETMON_P="$pass" openssl ec -aes256 -passout env:NETMON_P -out "$TMP/key" 2>>"$TMP/err" \
+     || ! NETMON_P="$pass" openssl ec -in "$TMP/key" -passin env:NETMON_P -pubout -out "$TMP/pub" 2>>"$TMP/err"; then
+    say_box "Creazione della chiave non riuscita:
+
+$(head -c 400 "$TMP/err")" stop
+    return 1
+  fi
+  mv "$TMP/key" "$KEY" && chmod 600 "$KEY"
+  mv "$TMP/pub" "$PUB" && chmod 644 "$PUB"
+  publish_pub
+  say_box "Chiave di rilascio creata.
+
+Impronta: $(fingerprint "$PUB")
+
+Ora:
+1. Metti la chiave pubblica nel repository netmon come server/release-key.pub. L'ho copiata sulla Scrivania (release-key.pub) e negli appunti.
+2. Salva una copia di riserva della chiave (menu «Salva una copia di riserva»): se perdi il Mac o la password non potrai più firmare pacchetti.
+3. Il primo pacchetto che contiene la chiave, firmato con questa app, la installa sulla VM: da lì in poi la VM accetta solo pacchetti firmati da te."
+}
+
+import_key() {
+  local f pass
+  f=$(choose_file "Scegli la copia di riserva della chiave (netmon-release-signing.key)" "")
+  [ -n "$f" ] || return 0
+  pass=$(ask_pass "Password della chiave di rilascio:")
+  [ -n "$pass" ] || return 0
+  if ! NETMON_P="$pass" openssl ec -in "$f" -passin env:NETMON_P -pubout -out "$TMP/pub" 2>/dev/null; then
+    say_box "Non è una chiave di rilascio di NetMon, oppure la password non è corretta." stop
+    return 1
+  fi
+  mkdir -p "$DIR" && chmod 700 "$DIR"
+  cp "$f" "$KEY" && chmod 600 "$KEY"
+  mv "$TMP/pub" "$PUB" && chmod 644 "$PUB"
+  say_box "Chiave importata.
+
+Impronta: $(fingerprint "$PUB")
+Deve essere la stessa mostrata nel pannello /admin (Server › Aggiornamento Netmon)."
+}
+
+# ------------------------------------------------------------------ firma e verifica
+zip_version() { unzip -p "$1" netmon/VERSION 2>/dev/null | head -c 40 | tr -cd '0-9.-'; }
+
+sign_zip() {
+  local zip ver pass inside note="" addkey=0
+  zip=$(choose_file "Scegli il pacchetto da firmare (netmon-….zip)" zip)
+  [ -n "$zip" ] || return 0
+  ver=$(zip_version "$zip")
+  if [ -z "$ver" ]; then say_box "$(basename "$zip") non sembra un pacchetto netmon (manca netmon/VERSION)." stop; return 1; fi
+  unzip -p "$zip" netmon/server/release-key.pub > "$TMP/inside.pub" 2>/dev/null
+  if [ ! -s "$TMP/inside.pub" ]; then
+    # senza chiave nel pacchetto una VM che non ne ha ancora una lo rifiuterebbe: si aggiunge la tua
+    addkey=1
+    note="
+
+Il pacchetto non contiene ancora la tua chiave pubblica: la aggiungo io (server/release-key.pub), così una VM che non ha ancora una chiave di rilascio la prende da qui. Impronta: $(fingerprint "$PUB")"
+  elif ! cmp -s "$TMP/inside.pub" "$PUB"; then
+    inside=$(fingerprint "$TMP/inside.pub")
+    note="
+
+ATTENZIONE: il pacchetto contiene una chiave pubblica DIVERSA dalla tua ($inside). Dopo l'installazione la VM accetterà solo pacchetti firmati con quella. Firma solo se stai cambiando chiave di proposito."
+  fi
+  ask_yes "Firmare il pacchetto netmon $ver?
+
+$(basename "$zip")$note" "Firma" || return 0
+  pass=$(ask_pass "Password della chiave di rilascio:")
+  [ -n "$pass" ] || return 0
+  if ! NETMON_P="$pass" openssl ec -in "$KEY" -passin env:NETMON_P -noout 2>/dev/null; then
+    say_box "La password della chiave di rilascio non è corretta." stop
+    return 1
+  fi
+  if [ "$addkey" = 1 ]; then
+    mkdir -p "$TMP/k/netmon/server" && cp "$PUB" "$TMP/k/netmon/server/release-key.pub" \
+      && chmod 644 "$TMP/k/netmon/server/release-key.pub"
+    if ! (cd "$TMP/k" && zip -q -X "$zip" netmon/server/release-key.pub) 2>"$TMP/err"; then
+      say_box "Non riesco ad aggiungere la chiave a $(basename "$zip") (cartella protetta?). Sposta lo zip sulla Scrivania e riprova.
+
+$(head -c 300 "$TMP/err")" stop
+      return 1
+    fi
+  fi
+  if ! NETMON_P="$pass" openssl dgst -sha256 -sign "$KEY" -passin env:NETMON_P -out "$TMP/sig.der" "$zip" 2>/dev/null; then
+    say_box "Firma non riuscita: la password non è corretta?" stop
+    return 1
+  fi
+  if ! openssl dgst -sha256 -verify "$PUB" -signature "$TMP/sig.der" "$zip" >/dev/null 2>&1; then
+    say_box "La firma appena fatta non si verifica con la chiave pubblica: chiave danneggiata?" stop
+    return 1
+  fi
+  if ! { openssl base64 -A -in "$TMP/sig.der"; echo; } > "$zip.sig"; then
+    say_box "Non riesco a scrivere $zip.sig (cartella protetta?). Sposta lo zip sulla Scrivania e riprova." stop
+    return 1
+  fi
+  chmod 644 "$zip.sig"
+  open -R "$zip.sig" 2>/dev/null
+  say_box "Pacchetto firmato: $(basename "$zip").sig, accanto allo zip.
+
+Nel pannello /admin (Server › Aggiornamento Netmon) seleziona insieme i due file: $(basename "$zip") e $(basename "$zip").sig.
+
+Chiave: $(fingerprint "$PUB")"
+}
+
+verify_zip() {
+  local zip sig
+  zip=$(choose_file "Scegli il pacchetto da verificare" zip)
+  [ -n "$zip" ] || return 0
+  sig="$zip.sig"
+  [ -f "$sig" ] || sig=$(choose_file "Scegli il file della firma (.sig) di $(basename "$zip")" "")
+  [ -n "$sig" ] || return 0
+  if openssl base64 -d -A -in "$sig" -out "$TMP/sig.der" 2>/dev/null && [ -s "$TMP/sig.der" ] \
+     && openssl dgst -sha256 -verify "$PUB" -signature "$TMP/sig.der" "$zip" >/dev/null 2>&1; then
+    say_box "Firma valida: $(basename "$zip") (versione $(zip_version "$zip")) è firmato con la tua chiave ($(fingerprint "$PUB"))."
+  else
+    say_box "Firma NON valida per la tua chiave: il pacchetto è stato modificato dopo la firma, oppure è firmato con un'altra chiave." stop
+  fi
+}
+
+show_pub() {
+  publish_pub
+  say_box "Chiave pubblica di rilascio:
+
+$(cat "$PUB")
+
+Impronta: $(fingerprint "$PUB")
+
+L'ho copiata negli appunti e sulla Scrivania (release-key.pub). Nel repository va in server/release-key.pub; nel pannello /admin l'impronta è in Server › Aggiornamento Netmon."
+}
+
+backup_key() {
+  local d
+  d=$(choose_folder "Dove salvo la copia di riserva? (per esempio una chiavetta USB)")
+  [ -n "$d" ] || return 0
+  d=${d%/}
+  if cp "$KEY" "$d/netmon-release-signing.key" && cp "$PUB" "$d/netmon-release-key.pub"; then
+    say_box "Copia di riserva salvata in $d:
+- netmon-release-signing.key (chiave privata, protetta dalla password)
+- netmon-release-key.pub (chiave pubblica)
+
+Tienila separata dal Mac e ricorda la password: senza tutte e due non potrai più firmare pacchetti."
+  else
+    say_box "Copia non riuscita in $d." stop
+  fi
+}
+
+# ------------------------------------------------------------------ menu
+command -v openssl >/dev/null || { say_box "Manca openssl: su macOS è in /usr/bin/openssl." stop; exit 1; }
+
+if [ ! -f "$KEY" ] || [ ! -f "$PUB" ]; then
+  c=$(choose_one "Su questo Mac non c'è ancora una chiave di rilascio di NetMon." \
+        "Crea una nuova chiave di rilascio" "Importa una copia di riserva della chiave")
+  case "$c" in
+    "Crea una nuova chiave di rilascio") create_key ;;
+    "Importa una copia di riserva della chiave") import_key ;;
+  esac
+  [ -f "$KEY" ] && [ -f "$PUB" ] || exit 0
+fi
+
+while :; do
+  c=$(choose_one "Chiave di rilascio: $(fingerprint "$PUB"). Cosa vuoi fare?" \
+        "Firma un pacchetto netmon.zip" "Verifica la firma di un pacchetto" \
+        "Mostra la chiave pubblica" "Salva una copia di riserva della chiave")
+  case "$c" in
+    "Firma un pacchetto netmon.zip") sign_zip ;;
+    "Verifica la firma di un pacchetto") verify_zip ;;
+    "Mostra la chiave pubblica") show_pub ;;
+    "Salva una copia di riserva della chiave") backup_key ;;
+    *) exit 0 ;;
+  esac
+done

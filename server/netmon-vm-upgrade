@@ -1,0 +1,51 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Aggiornamento dei pacchetti della VM, avviato dal pannello di amministrazione di netmon.
+# Installazione: sudo install -m 755 -o root -g root netmon-vm-upgrade /usr/local/sbin/
+# Gira come root in un'unità systemd separata; scrive log e stato in /var/lib/netmon-vm
+# (cartella di root, leggibile dal servizio netmon).
+set -u
+umask 022
+STATE=/var/lib/netmon-vm
+LOG="$STATE/upgrade.log"
+STATUS="$STATE/upgrade.status"
+STARTED=$(date +%s)
+
+write_status() {   # $1 stato, $2 fine, $3 codice di uscita
+  printf '{"state":"%s","started":%s,"finished":%s,"exit":%s}\n' \
+    "$1" "$STARTED" "${2:-null}" "${3:-null}" > "$STATUS.tmp"
+  chmod 644 "$STATUS.tmp"
+  mv -f "$STATUS.tmp" "$STATUS"
+}
+
+mkdir -p "$STATE"
+chmod 755 "$STATE"
+rm -f "$LOG"
+: > "$LOG"
+chmod 644 "$LOG"
+write_status running
+
+# Priorità bassa (CPU e disco) per tutto l'aggiornamento: su una VM piccola, con una CPU condivisa,
+# netmon e Caddy devono continuare a rispondere mentre apt lavora. I processi figli la ereditano.
+renice -n 15 -p $$ >/dev/null 2>&1 || true
+ionice -c 3 -p $$ >/dev/null 2>&1 || true
+
+export DEBIAN_FRONTEND=noninteractive
+{
+  echo "== $(date '+%d/%m/%Y %H:%M:%S') · apt-get update =="
+  apt-get update &&
+  echo "== apt-get upgrade (con i nuovi pacchetti richiesti, per esempio un nuovo kernel) ==" &&
+  apt-get -y --with-new-pkgs -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade &&
+  echo "== apt-get autoremove (vecchi kernel e pacchetti non più necessari) ==" &&
+  apt-get -y autoremove
+} >> "$LOG" 2>&1
+RC=$?
+
+running=$(uname -r)
+newest=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||' | sort -V | tail -1)
+if [ -f /var/run/reboot-required ] || { [ -n "$newest" ] && [ "$newest" != "$running" ]; }; then
+  echo "== Per completare l'aggiornamento è consigliato un riavvio della VM ==" >> "$LOG"
+fi
+echo "== Fine: codice $RC ==" >> "$LOG"
+if [ "$RC" -eq 0 ]; then write_status ok "$(date +%s)" "$RC"; else write_status error "$(date +%s)" "$RC"; fi
+exit "$RC"

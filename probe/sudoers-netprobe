@@ -1,0 +1,11 @@
+# netmon versione 1.1.20261026-104239
+# netmon · permessi della sonda (utente netprobe): solo riavvio, aggiornamento del sistema e di netmon (anche da pacchetto caricato), reti Wi-Fi e disinstallazione, nient'altro.
+# Installazione:  sudo install -m 440 -o root -g root sudoers-netprobe /etc/sudoers.d/netprobe
+#                 sudo visudo -c        (deve rispondere "parsed OK")
+netprobe ALL=(root) NOPASSWD: /usr/bin/systemctl reboot
+netprobe ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=netprobe-upgrade --collect --quiet /usr/local/sbin/netprobe-upgrade
+netprobe ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=netprobe-selfupdate --collect --quiet /usr/local/sbin/netprobe-selfupdate
+netprobe ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=netprobe-zipupdate --collect --quiet /usr/local/sbin/netprobe-zipupdate
+netprobe ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=netprobe-wifi --collect --quiet /usr/local/sbin/netprobe-wifi
+# Disinstallazione dal tasto della pagina locale: in un'unità separata, perché ferma anche il servizio della pagina
+netprobe ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=netprobe-uninstall --collect --quiet /usr/local/sbin/netprobe-uninstall --conferma

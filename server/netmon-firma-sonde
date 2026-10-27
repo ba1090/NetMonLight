@@ -1,0 +1,79 @@
+#!/bin/bash
+# netmon versione 1.1.20261026-104239
+# Firma i programmi della sonda che il server distribuisce con il tasto "Aggiorna netmon"
+# (i quattro programmi e, se c'è, il pacchetto completo netmon.zip).
+# Installazione: sudo install -m 755 -o root -g root netmon-firma-sonde /usr/local/sbin/
+# Uso (root):    sudo netmon-firma-sonde [cartella]      (predefinita: /opt/netmon/probe-dist)
+#
+# La chiave privata sta in /etc/netmon, leggibile solo da root: il servizio web (utente netmon)
+# non la vede, quindi chi prendesse il controllo del sito o del dominio non potrebbe far
+# installare codice alle sonde. La prima volta la chiave viene creata; le sonde ricevono la
+# chiave pubblica (update-key.pub) con installa-sonda.sh e da lì accettano solo file firmati.
+set -euo pipefail
+umask 022
+DIST=${1:-/opt/netmon/probe-dist}
+KEYDIR=/etc/netmon
+KEY=$KEYDIR/update-signing.key
+PUB=$KEYDIR/update-signing.pub
+FILES=(probe.py pinger.py config_web.py sysops.py)
+
+[ "$(id -u)" -eq 0 ] || { echo "Lancia il comando con sudo." >&2; exit 1; }
+command -v openssl >/dev/null || { echo "Manca openssl: sudo apt install openssl" >&2; exit 1; }
+[ -d "$DIST" ] && [ ! -L "$DIST" ] || { echo "Cartella $DIST non trovata." >&2; exit 1; }
+
+install -d -m 700 -o root -g root "$KEYDIR"
+if [ ! -s "$KEY" ]; then
+  ( umask 077; openssl genpkey -algorithm ED25519 -out "$KEY" )
+  echo "Creata la chiave di firma degli aggiornamenti: $KEY"
+fi
+chown root:root "$KEY"; chmod 600 "$KEY"
+openssl pkey -in "$KEY" -pubout -out "$PUB"
+chmod 644 "$PUB"
+
+for f in "${FILES[@]}"; do
+  if [ -L "$DIST/$f" ] || [ ! -f "$DIST/$f" ]; then echo "Manca $DIST/$f" >&2; exit 1; fi
+done
+
+# Copia privata: si firma esattamente ciò che si pubblica
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+for f in "${FILES[@]}"; do cp --no-preserve=all "$DIST/$f" "$TMP/$f"; done
+( cd "$TMP" && for f in "${FILES[@]}"; do sha256sum "$f"; done ) > "$TMP/manifest"
+openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$TMP/manifest" -out "$TMP/manifest.sig"
+openssl pkeyutl -verify -pubin -inkey "$PUB" -rawin -in "$TMP/manifest" -sigfile "$TMP/manifest.sig" >/dev/null
+
+# Pubblicazione: file di root, il servizio li può solo leggere
+for f in "${FILES[@]}"; do install -m 644 -o root -g root "$TMP/$f" "$DIST/$f"; done
+install -m 644 -o root -g root "$TMP/manifest" "$DIST/manifest"
+install -m 644 -o root -g root "$TMP/manifest.sig" "$DIST/manifest.sig"
+install -m 644 -o root -g root "$PUB" "$DIST/update-key.pub"
+
+# Pacchetto completo (netmon.zip) per l'aggiornamento completo delle sonde: si firma un piccolo
+# manifesto con l'impronta dello zip e la sua versione; la sonda lo verifica prima di scaricarlo
+# e root sulla sonda lo verifica di nuovo prima di installarlo.
+rm -f "$DIST/package.manifest" "$DIST/package.sig"
+if [ -f "$DIST/netmon.zip" ] && [ ! -L "$DIST/netmon.zip" ]; then
+  cp --no-preserve=all "$DIST/netmon.zip" "$TMP/netmon.zip"
+  PKGVER=$(python3 - "$TMP/netmon.zip" <<'EOF' 2>/dev/null
+import re, sys, zipfile
+v = zipfile.ZipFile(sys.argv[1]).read("netmon/VERSION").decode().strip()
+print(v if re.fullmatch(r"\d+\.\d+\.\d{8}-\d{6}", v) else "")
+EOF
+) || PKGVER=""
+  if [ -n "$PKGVER" ]; then
+    printf '%s  netmon.zip\nversion %s\n' "$(sha256sum "$TMP/netmon.zip" | cut -d' ' -f1)" "$PKGVER" > "$TMP/package.manifest"
+    openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$TMP/package.manifest" -out "$TMP/package.sig"
+    openssl pkeyutl -verify -pubin -inkey "$PUB" -rawin -in "$TMP/package.manifest" -sigfile "$TMP/package.sig" >/dev/null
+    install -m 644 -o root -g root "$TMP/netmon.zip" "$DIST/netmon.zip"
+    install -m 644 -o root -g root "$TMP/package.manifest" "$DIST/package.manifest"
+    install -m 644 -o root -g root "$TMP/package.sig" "$DIST/package.sig"
+    echo "Pacchetto completo per le sonde firmato (versione $PKGVER)."
+  else
+    echo "Pacchetto $DIST/netmon.zip senza versione valida: non firmato." >&2
+  fi
+fi
+chown root:root "$DIST"; chmod 755 "$DIST"
+
+FP=$(openssl pkey -pubin -in "$PUB" -outform DER | sha256sum | cut -c1-16 | sed 's/..../& /g;s/ $//')
+VER=$(sed -n 's/^__version__ *= *"\([^"]*\)".*/\1/p' "$DIST/probe.py" | head -n1)
+echo "Programmi della sonda firmati (versione ${VER:-?}). Impronta della chiave: $FP"
