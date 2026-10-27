@@ -77,17 +77,20 @@ def test_public_routes_have_no_user_data(client, two_users):
             assert secret not in body, f"{path} contiene {secret!r}"
 
 
-def test_internal_routes_hidden_without_gateway_secret(client):
-    """Le rotte /internal esistono solo per il gateway: senza la sua chiave rispondono 404."""
+def test_multivm_routes_do_not_exist(client):
+    """NetMon Light è un server solo: niente rotte del gateway né del collegamento di altre VM."""
     for path in ("/internal/status", "/internal/vms", "/internal/invites", "/internal/is-admin",
-                 "/internal/has-user?email=a@b.it", "/internal/has-probe?h=" + "0" * 64):
+                 "/internal/has-user?email=a@b.it", "/internal/has-probe?h=" + "0" * 64, "/api/admin/vms"):
         r = client.get(path, headers={"X-Netmon-Gateway": "indovinata"})
         assert r.status_code == 404, path
+    for path in ("/api/vm/join", "/api/vm/notice", "/api/vm/where", "/api/admin/move", "/api/admin/move/check",
+                 "/api/admin/vms/token", "/api/admin/schedules/all"):
+        assert client.post(path, json={}).status_code in (404, 405), path
 
 
 @pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"])
 def test_api_schema_not_published(client, path):
-    """Nessuna documentazione automatica: lo schema elencherebbe tutte le rotte, anche le /internal."""
+    """Nessuna documentazione automatica: lo schema elencherebbe tutte le rotte."""
     r = client.get(path)
     assert r.status_code == 404, f"{path}: {r.status_code}"
     assert "/internal/" not in r.text
@@ -174,19 +177,18 @@ def test_admin_mfa_stage_rejects_wrong_and_replayed_codes(client, fresh_admin):
         assert client.post("/api/admin/auth/mfa", json={"code": code}, headers=h2).status_code == 401
 
 
-def test_forwarded_admin_headers_ignored_on_single_server(client, two_users):
-    """Le intestazioni del gateway (X-Netmon-Admin…) non valgono senza VM_ID, chiave e IP fidato."""
+def test_forwarded_admin_headers_ignored(client, two_users):
+    """Le intestazioni del vecchio gateway (X-Netmon-Admin…) non danno nessun accesso."""
     h = {"X-Netmon-Gateway": "qualunque", "X-Netmon-Admin": "finto@example.test", "X-Netmon-Pw-Checked": "1",
          "X-Forwarded-For": "10.0.0.1"}
     assert client.get("/api/admin/overview", headers=h).status_code == 401
     assert client.post("/api/admin/users/block", json={"id": 1, "password": "x"}, headers=h).status_code == 401
 
 
-def test_admin_forward_to_unknown_vm_is_refused(admin):
-    """Un nome di VM che non esiste non viene inoltrato da nessuna parte."""
-    assert admin.get("/api/admin/overview", headers={"X-Netmon-VM": "vmfinta"}).status_code == 422
-    r = admin.post("/api/admin/users/block", {"id": 1, "password": "x"}, headers={"X-Netmon-VM": "vmfinta"})
-    assert r.status_code == 422
+def test_vm_header_is_ignored(admin):
+    """L'intestazione X-Netmon-VM non inoltra niente: la richiesta vale per questo server."""
+    r = admin.get("/api/admin/overview", headers={"X-Netmon-VM": "vmfinta"})
+    assert r.status_code == 200 and "vms" not in r.json()
 
 
 def test_forged_session_cookies_rejected(client, two_users):

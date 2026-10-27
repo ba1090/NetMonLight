@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261026-104239"
+__version__ = "1.1.20261027-161500"
 VERSION = __version__
 import asyncio
 import base64
@@ -24,7 +24,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import re
 from typing import Any, Literal, Optional, Union
@@ -37,7 +37,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, field_validator
 
 from auth import (ADMIN_SESSION_HOURS, ADMIN_TRUST_DAYS, SESSION_DAYS_REMEMBER, VERIFY_HOURS, AuthDB,
-                  ClosingConnection, VM_ID, ProbeRegistry, Throttle,
+                  ClosingConnection, ProbeRegistry, Throttle,
                   temporary_password,
                   normalize_email, password_problem, valid_email)
 import brand
@@ -1887,7 +1887,7 @@ async def watchdog():
                     save_state()
             if time.time() - last_purge > 3600:
                 last_purge = time.time()
-                _user_retention.clear()           # account arrivati da altre VM nel frattempo
+                _user_retention.clear()           # account importati nel frattempo
                 await asyncio.to_thread(purge_samples)
                 await asyncio.to_thread(auth.purge_expired)
                 await asyncio.to_thread(vmops.trim_self)    # memoria libera del server restituita al sistema
@@ -1988,7 +1988,7 @@ async def lifespan(_app):
 
 
 # Niente documentazione automatica dell'API, nemmeno lo schema /openapi.json: elencherebbe a chiunque
-# tutte le rotte, comprese quelle /internal che senza la chiave del gateway rispondono 404 apposta
+# tutte le rotte, comprese quelle del pannello di amministrazione
 app = FastAPI(title="netmon", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 # Intestazioni di sicurezza per tutte le risposte. Le pagine hanno script e stili nel file stesso
@@ -2023,8 +2023,9 @@ def reserve_attempt(limiter, keys):
 
 # Dominio cambiato: i vecchi nomi di questa macchina (OLD_HOSTS nel .env, li scrive installa-server.sh)
 # restano serviti da Caddy e rimandano tutti a PUBLIC_URL. Le sonde ricevono il nuovo indirizzo con la
-# stessa risposta degli utenti spostati (410 con «moved») e lo scrivono da sole nella configurazione.
+# risposta 410 con «moved» e lo scrivono da sole nella configurazione.
 OLD_HOSTS = {h.strip().lower() for h in os.getenv("OLD_HOSTS", "").split(",") if h.strip()}
+PROBE_PATHS = ("/api/report", "/api/backfill", "/api/probe-config", "/api/probe-update", "/api/probe-package")
 
 
 def old_host_reply(request: Request):
@@ -2069,14 +2070,10 @@ async def security_middleware(request: Request, call_next):
     moved = old_host_reply(request)                                        # dominio cambiato
     if moved is not None:
         return moved
-    moved = moved_reply(path, request.headers.get("authorization", ""))   # sonde di un utente spostato
-    if moved is not None:
-        return moved
     held = []
     _attempts.set(held)
     try:
-        # più VM: un'azione del pannello per un'altra VM la gira la VM di controllo
-        response = await admin_forward(request) or await call_next(request)
+        response = await call_next(request)
     finally:
         for limiter, keys in held:
             limiter.release(*keys)
@@ -2120,12 +2117,9 @@ def migrate_env_channels():
 migrate_env_channels()
 
 
-# Dietro il gateway (più VM) la connessione arriva dall'IP privato del gateway, non da Caddy in
-# locale: TRUSTED_PROXIES nel .env elenca gli indirizzi a cui credere per X-Forwarded-For.
-# Il gateway (TRUSTED_PROXIES nel .env, sulla rete privata): solo da lì arrivano le azioni del
-# pannello inoltrate a una VM. Il Caddy della VM stessa (127.0.0.1) porta il traffico pubblico.
-GATEWAY_PEERS = {a.strip() for a in os.getenv("TRUSTED_PROXIES", "").split(",") if a.strip()}
-TRUSTED_PROXIES = {"127.0.0.1", "::1"} | GATEWAY_PEERS
+# Il traffico pubblico arriva da Caddy, sulla stessa macchina (127.0.0.1). Con un altro proxy davanti
+# (per esempio un bilanciatore) TRUSTED_PROXIES nel .env elenca gli indirizzi a cui credere per X-Forwarded-For.
+TRUSTED_PROXIES = {"127.0.0.1", "::1"} | {a.strip() for a in os.getenv("TRUSTED_PROXIES", "").split(",") if a.strip()}
 
 
 def client_ip(request: Request) -> str:
@@ -2584,8 +2578,7 @@ def too_many(*keys, limiter=None):
 async def auth_state(request: Request):
     """Chi è collegato, e se non esiste ancora nessun account (primo accesso)."""
     user = await asyncio.to_thread(auth.session_user, request.cookies.get(COOKIE))
-    # Su una VM dietro il gateway gli account nascono solo dai codici di accesso: niente «primo accesso»
-    first = not VM_ID and not ORCHESTRATOR and not await asyncio.to_thread(auth.has_users)
+    first = not await asyncio.to_thread(auth.has_users)
     return {"user": user["email"] if user else None, "lang": request_lang(request, user),
             "tz": (user or {}).get("tz") or "", "server_tz": SERVER_TZ_NAME,
             "must_change": bool(user and user.get("must_change")), "setup_needed": first}
@@ -2701,16 +2694,10 @@ async def auth_register(b: SetupBody, request: Request):
     di accesso invece e' personale, si puo' revocare e dice chi ha invitato chi.
 
     Tutti gli account sono uguali: ognuno vede e riceve solo le sue sonde."""
-    if ORCHESTRATOR:
-        raise HTTPException(status_code=404, detail="Gli account vivono sulle VM, non sull'orchestratore.")
     ip = client_ip(request)
     too_many("ip:" + ip)
     code = b.token.strip()
-    first = not await asyncio.to_thread(auth.has_users)
-    # Dietro il gateway (VM_ID impostato) la chiave del server non registra nessuno, nemmeno il
-    # primo account: il gateway la manderebbe sempre alla VM predefinita. Su una VM nuova anche il
-    # primo utente entra con un codice di accesso creato dal pannello (sul gateway).
-    by_key = first and not VM_ID
+    by_key = not await asyncio.to_thread(auth.has_users)
     key_ok = bool(code) and by_key and hmac.compare_digest(code, API_TOKEN)
     invite = None if key_ok else code
     if not key_ok and (by_key or not code.startswith("accesso_")):
@@ -2767,16 +2754,6 @@ async def auth_login(b: LoginBody, request: Request):
     too_many("ip:" + ip)
     too_many(pair, limiter=account_throttle)
     uid = await asyncio.to_thread(auth.verify_login, email, b.password)
-    if uid is None and email in _moved["users"]:
-        return JSONResponse({"detail": "Il tuo account è stato spostato su un altro server: ti porto lì.",
-                             "moved": _moved["users"][email]}, status_code=410)
-    # account che non è su questa VM ma su un'altra: si va lì (con l'email già scritta)
-    if uid is None and VM_ID and "@" in email and not await asyncio.to_thread(auth.user_exists, email):
-        throttle.fail("ip:" + ip)        # la domanda costa come un tentativo sbagliato: non si sondano le email
-        if other := await asyncio.to_thread(where_else, email):
-            log.info("Accesso di %s sulla VM sbagliata: lo mando a %s", email, other)
-            return JSONResponse({"detail": "Il tuo account è su un altro server: ti porto lì.", "moved": other},
-                                status_code=410)
     if uid is None:
         throttle.fail("ip:" + ip)
         account_throttle.fail(pair)
@@ -2911,7 +2888,7 @@ def inactive_public():
     for e in inactive_load():
         out.append({"id": e["id"], "email": e["email"], "probes": len(e["keys"]), "by": e.get("by") or "",
                     "deleted": fmt_when(e["deleted"]),
-                    "purge": fmt_when(e["deleted"] + INACTIVE_DAYS * 86400), "vm": VM_ID})
+                    "purge": fmt_when(e["deleted"] + INACTIVE_DAYS * 86400)})
     return out
 
 
@@ -3560,14 +3537,7 @@ STAGE_MESSAGES = {"mfa": "Inserisci il codice di verifica.",
 
 
 async def admin_user(request: Request):
-    """Amministratore con accesso completo (password e verifica in due passaggi), oppure quello
-    della VM di controllo che agisce su questa VM (più VM dietro il gateway)."""
-    fwd = forwarded_admin(request)
-    if fwd:
-        VIEW_TZ.set(tz_named(fwd.get("tz")))
-        return fwd
-    if VM_ID:
-        raise HTTPException(status_code=401, detail="Il pannello di amministrazione è sul gateway.")
+    """Amministratore con accesso completo (password e verifica in due passaggi)."""
     adm = await asyncio.to_thread(auth.admin_session, request.cookies.get(ADMIN_COOKIE))
     if adm is None:
         raise HTTPException(status_code=401, detail="accesso richiesto")
@@ -3644,33 +3614,7 @@ def admin_kind(title):
 
 
 def admin_send(title, body, kind, critical=False):
-    """Avviso a ogni amministratore sui canali che ha scelto per questo tipo (email, Telegram).
-    Su una VM probe gli amministratori sono quelli dell'orchestratore: l'avviso va a lui, e solo
-    se non risponde agli eventuali amministratori della VM."""
-    if VM_ID and GATEWAY_SECRET and notice_to_orchestrator(title, body, kind, critical):
-        return
-    admin_send_local(title, body, kind, critical)
-
-
-def notice_to_orchestrator(title, body, kind, critical) -> bool:
-    """Avviso di questa VM probe agli amministratori dell'orchestratore, attraverso il gateway."""
-    import urllib.request
-    base = (os.getenv("GATEWAY_URL", "") or os.getenv("PUBLIC_URL", "")).strip().rstrip("/")
-    if not base:
-        return False
-    payload = {"vm": VM_ID, "key": GATEWAY_SECRET, "title": title[:300], "body": (body or "")[:4000],
-               "kind": kind, "critical": bool(critical)}
-    req = urllib.request.Request(base + "/api/vm/notice", data=json.dumps(payload).encode(), method="POST",
-                                 headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status == 200
-    except (OSError, ValueError) as exc:
-        log.warning("Avviso all'orchestratore non consegnato (%s): lo mando agli amministratori locali", exc)
-        return False
-
-
-def admin_send_local(title, body, kind, critical=False):
+    """Avviso a ogni amministratore sui canali che ha scelto per questo tipo (email, Telegram)."""
     for a in auth.admin_contacts():
         lang = a.get("lang") or "it"                   # nella lingua scelta da ogni amministratore
         title_l, body_l = (title, body) if lang == "it" else (i18n.tr(lang, title), i18n.tr_text(lang, body))
@@ -3887,421 +3831,7 @@ async def admin_password(b: AdminPassword, request: Request):
     return resp
 
 
-# --- rotte interne per il gateway (più VM dietro un indirizzo unico) -------------------------
-# Esistono solo se GATEWAY_SECRET è impostato, e rispondono solo a chi lo presenta. Il gateway
-# non le inoltra mai dall'esterno.
-GATEWAY_SECRET = os.getenv("GATEWAY_SECRET", "").strip()
-
-
-def gateway_only(x_netmon_gateway: str = Header(default="")):
-    if not GATEWAY_SECRET or not hmac.compare_digest(x_netmon_gateway, GATEWAY_SECRET):
-        raise HTTPException(status_code=404, detail="Not Found")
-
-
-# Più VM: il gateway è l'orchestratore. Sulla sua macchina gira netmon con ROLE=orchestratore:
-# niente utenti né sonde, solo il pannello di amministrazione di tutte le VM e i suoi
-# amministratori. Le VM probe (VM_ID impostato) sono tutte uguali: utenti, sonde e dati; il
-# pannello non ce l'hanno e accettano comandi solo dall'orchestratore.
-# Una VM si collega con un token univoco generato dal pannello (Server › Tutte le VM): in
-# installazione la VM lo presenta all'orchestratore (/api/vm/join, attraverso il gateway) e riceve
-# il suo nome, la sua chiave personale (GATEWAY_SECRET nel suo .env) e le impostazioni comuni.
-# L'elenco delle VM con le chiavi sta in vms.json nei dati dell'orchestratore; il gateway lo
-# rilegge da lui (GATEWAY_SECRET dell'orchestratore, condiviso solo con il gateway sulla stessa macchina).
-ROLE = os.getenv("ROLE", "").strip().lower()
-ORCHESTRATOR = ROLE in ("orchestratore", "orchestrator")
-if ORCHESTRATOR and VM_ID:
-    raise SystemExit("Con ROLE=orchestratore VM_ID va lasciato vuoto: l'orchestratore non ha utenti né sonde.")
-IS_CONTROL = not VM_ID                              # orchestratore, oppure server singolo
-CONTROL_NAME = "gateway" if ORCHESTRATOR else VM_ID
-VMS_FILE = DATA_DIR / "vms.json"
-VM_NAME = re.compile(r"[a-z0-9]{1,16}")
-JOIN_HOURS = 24                                     # validità di un token per collegare una VM
-
-
-def load_registry() -> dict:
-    if not ORCHESTRATOR:
-        return {"vms": {}, "tokens": {}}
-    try:
-        data = json.loads(VMS_FILE.read_text())
-    except FileNotFoundError:
-        data = {}
-    except (OSError, ValueError) as exc:
-        log.error("Elenco delle VM illeggibile (%s): riparto da vuoto", exc)
-        data = {}
-    vms = {k: v for k, v in (data.get("vms") or {}).items()
-           if VM_NAME.fullmatch(k) and isinstance(v, dict) and v.get("url") and v.get("key")}
-    tokens = {k: v for k, v in (data.get("tokens") or {}).items() if VM_NAME.fullmatch(k) and isinstance(v, dict)}
-    moved = data.get("moved") if isinstance(data.get("moved"), dict) else {}
-    moved = {k: dict(moved.get(k) or {}) for k in ("probes", "users")}       # utenti spostati: chi sta dove
-    return {"vms": vms, "tokens": tokens, "moved": moved}
-
-
-REGISTRY = load_registry()
-PEERS = {k: v["url"] for k, v in REGISTRY["vms"].items()}     # VM probe: nome -> indirizzo privato
-KEYS = {k: v["key"] for k, v in REGISTRY["vms"].items()}      # nome -> chiave personale
-_registry_lock = threading.Lock()
-
-
-def public_of(vm: str) -> str:
-    """Indirizzo pubblico di una VM probe (sonde e utenti ci arrivano direttamente)."""
-    return (REGISTRY["vms"].get(vm) or {}).get("public") or ""
-
-
-def save_registry(change):
-    """Solo sull'orchestratore: change(registry) modifica l'elenco, che viene scritto in modo atomico."""
-    with _registry_lock:
-        change(REGISTRY)
-        tmp = VMS_FILE.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)     # contiene le chiavi
-        with os.fdopen(fd, "w") as f:
-            json.dump(REGISTRY, f, indent=1, sort_keys=True)
-        os.replace(tmp, VMS_FILE)
-        PEERS.clear()
-        PEERS.update({k: v["url"] for k, v in REGISTRY["vms"].items()})
-        KEYS.clear()
-        KEYS.update({k: v["key"] for k, v in REGISTRY["vms"].items()})
-
-
-def peer_request(vm: str, method: str, path: str, payload=None, headers=None, timeout=10, raw=None):
-    """Chiamata a una VM sulla rete privata: (stato, corpo JSON). Stato 0 = non raggiungibile.
-    Con raw=(byte, content-type) il corpo va così com'è (per esempio un pacchetto .zip)."""
-    import urllib.error
-    import urllib.request
-    data, ctype = raw if raw is not None else (
-        json.dumps(payload).encode() if payload is not None else None, "application/json")
-    req = urllib.request.Request(PEERS[vm] + path, method=method, data=data,
-                                 headers={"Content-Type": ctype,
-                                          "X-Netmon-Gateway": KEYS.get(vm, ""), **(headers or {})})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, json.loads(r.read() or b"{}")
-    except urllib.error.HTTPError as e:
-        try:
-            return e.code, json.loads(e.read() or b"{}")
-        except ValueError:
-            return e.code, {"detail": f"Errore {e.code} dalla VM {vm}."}
-    except (OSError, ValueError) as exc:
-        log.warning("VM %s non raggiungibile (%s %s): %s", vm, method, path, exc)
-        return 0, {}
-
-
-def as_admin(adm: dict, pw_checked: bool = False) -> dict:
-    """Intestazioni con cui l'orchestratore agisce su una VM a nome di questo amministratore.
-    pw_checked: l'orchestratore ha appena verificato la sua password (la VM non può farlo)."""
-    return {"X-Netmon-Admin": quote(adm["login"]), "X-Netmon-Admin-Name": quote(adm.get("name") or ""),
-            "X-Netmon-Admin-Tz": adm.get("tz") or "",
-            **({"X-Netmon-Pw-Checked": "1"} if pw_checked else {})}
-
-
-async def on_peer(vm: str, path: str, body: BaseModel, adm: dict):
-    """Sull'orchestratore i codici di accesso vivono sulle VM: la richiesta va alla VM indicata (o,
-    se non indicata, a quella con meno sonde) a nome di questo amministratore. None = questa VM
-    (server singolo). La VM si fida solo della sua chiave."""
-    vm = (vm or "").strip().lower()
-    if ORCHESTRATOR and vm in ("", CONTROL_NAME):
-        vm = await least_loaded_vm()
-    if not vm or vm == VM_ID:
-        return None
-    if vm not in PEERS:
-        raise HTTPException(status_code=422, detail=f"VM sconosciuta: {vm}.")
-    status, data = await asyncio.to_thread(peer_request, vm, "POST", path, body.model_dump() | {"vm": ""},
-                                           as_admin(adm))
-    if status == 0:
-        raise HTTPException(status_code=502, detail=f"La VM {vm} non risponde: riprova tra poco.")
-    log.info("Codici di accesso: %s inoltrato a %s per %s (esito %s)", path, vm, adm["login"], status)
-    return JSONResponse(data, status_code=status)
-
-
-async def least_loaded_vm() -> str:
-    """La VM che risponde e ha meno sonde: dove nasce un utente se non si sceglie."""
-    if not PEERS:
-        raise HTTPException(status_code=409, detail="Nessuna VM collegata: aggiungine una da Server › Tutte le VM.")
-    loads = [(o["probes"], vm) for vm, o in (await peers_invites()).items() if o is not None]
-    if not loads:
-        raise HTTPException(status_code=502, detail="Nessuna VM risponde: riprova tra poco.")
-    return min(loads)[1]
-
-
-def forwarded_admin(request: Request):
-    """Su una VM probe: amministratore dell'orchestratore che agisce su questa VM (richiesta con la
-    chiave della VM). La sua password l'ha già controllata l'orchestratore."""
-    from urllib.parse import unquote
-    secret = request.headers.get("x-netmon-gateway", "")
-    login = request.headers.get("x-netmon-admin", "")
-    peer = request.client.host if request.client else ""
-    if (VM_ID and GATEWAY_SECRET and secret and login and peer in GATEWAY_PEERS
-            and hmac.compare_digest(secret, GATEWAY_SECRET)):
-        return {"id": None, "login": unquote(login)[:254], "email": "", "mfa": True,
-                "name": unquote(request.headers.get("x-netmon-admin-name", ""))[:80],
-                "stage": "full", "forwarded": True, "tz": request.headers.get("x-netmon-admin-tz", "")[:64],
-                "pw_checked": request.headers.get("x-netmon-pw-checked") == "1"}
-    return None
-
-
 invite_admin = admin_user                             # stessa cosa, nome rimasto per le rotte degli inviti
-
-# Azioni del pannello che l'orchestratore inoltra a una VM (intestazione X-Netmon-VM).
-# Amministratori, profilo, Telegram e avvisi restano suoi: gli amministratori vivono solo lì.
-FORWARDABLE = ("/api/admin/users/", "/api/admin/probes", "/api/admin/schedules", "/api/admin/package",
-               "/api/admin/vm", "/api/admin/invites/", "/api/admin/retention", "/api/admin/transfer/")
-
-
-async def admin_forward(request: Request):
-    """Richiesta del pannello per una VM: controlla qui accesso e password, poi la passa a quella
-    VM e ne restituisce la risposta. None se è per questa macchina."""
-    vm = request.headers.get("x-netmon-vm", "").strip().lower()
-    path = request.url.path
-    if vm in ("", CONTROL_NAME) or not path.startswith("/api/admin/") or forwarded_admin(request):
-        return None
-    if path == "/api/admin/transfer/download":         # un file, non JSON: lo passa api_transfer_download
-        return None
-    if not IS_CONTROL or vm not in PEERS:
-        return JSONResponse({"detail": f"VM sconosciuta: {vm}."}, status_code=422)
-    if path.startswith("/api/admin/vms") or not path.startswith(FORWARDABLE):
-        return JSONResponse({"detail": "Questa sezione vale per tutte le VM."}, status_code=422)
-    checked = False
-    try:
-        adm = await admin_user(request)
-        body = await request.body()
-        ctype = request.headers.get("content-type", "application/json")
-        # La password si controlla qui, qualunque sia il Content-Type: la VM accetta l'azione solo
-        # se l'orchestratore le dice di averla verificata (X-Netmon-Pw-Checked).
-        try:
-            fields = json.loads(body) if body else None
-        except ValueError:
-            fields = None
-        if isinstance(fields, dict) and "password" in fields:
-            await check_admin_pw(adm, str(fields["password"]), request)
-            checked = True
-    except HTTPException as e:
-        return JSONResponse({"detail": e.detail}, status_code=e.status_code)
-    target = path + ("?" + request.url.query if request.url.query else "")
-    extra = as_admin(adm, checked)
-    if path == "/api/admin/package" and request.headers.get("x-netmon-signature"):
-        extra["X-Netmon-Signature"] = request.headers["x-netmon-signature"][:2048]   # la VM la verifica da sé
-    status, data = await asyncio.to_thread(peer_request, vm, request.method, target, None, extra,
-                                           120 if path.startswith("/api/admin/package") else 30,
-                                           (body or None, ctype))
-    if status == 0:
-        return JSONResponse({"detail": f"La VM {vm} non risponde: riprova tra poco."}, status_code=502)
-    if request.method != "GET":
-        log.info("Pannello: %s %s inoltrato a %s per %s (esito %s)", request.method, path, vm, adm["login"], status)
-    return JSONResponse(data, status_code=status)
-
-
-async def peers_invites() -> dict:
-    """Codici di accesso e carico (utenti, sonde) delle altre VM; None per quelle che non rispondono."""
-    async def one(vm):
-        status, data = await asyncio.to_thread(peer_request, vm, "GET", "/internal/invites", None, None, 5)
-        return vm, (data if status == 200 else None)
-    return dict(await asyncio.gather(*(one(vm) for vm in PEERS)))
-
-
-@app.get("/internal/invites", dependencies=[Depends(gateway_only)])
-async def internal_invites():
-    def collect():
-        return fmt_invites(auth.list_invites()), users_list()
-    invites, users = await asyncio.to_thread(collect)
-    return {"invites": invites, "users": len(users), "probes": sum(u["probes"] for u in users), "user_list": users,
-            "inactive": await asyncio.to_thread(inactive_public)}
-
-
-def vm_status() -> dict:
-    """Riassunto di questa VM per la vista «Tutte le VM» del pannello."""
-    i = vmops.info(DATA_DIR, "")
-    owned = registry.owned_keys()
-    users = auth.users_overview()
-    return {"vm": VM_ID or CONTROL_NAME, "version": VERSION, "users": len(users),
-            "probes_total": sum(1 for k in monitor.state if k in owned),
-            "probes_online": sum(1 for k, p in monitor.state.items() if k in owned and not p.get("offline")),
-            "uptime": i["uptime"], "cpus": i["cpus"], "cpu_percent": i["cpu_percent"], "load1": i["load1"],
-            "mem_total": i["mem_total"], "mem_available": i["mem_available"],
-            "disk_total": i["disk_total"], "disk_used": i["disk_used"], "data_total": i["data_total"],
-            "disk_free": shutil.disk_usage(DATA_DIR).free,
-            "ip": i["ip"], "reboot": bool((i["reboot"] or {}).get("required"))}
-
-
-@app.get("/internal/status", dependencies=[Depends(gateway_only)])
-async def internal_status():
-    return await asyncio.to_thread(vm_status)
-
-
-@app.get("/internal/vms", dependencies=[Depends(gateway_only)])
-async def internal_vms():
-    """Elenco delle VM con le loro chiavi, per il gateway (sulla stessa macchina dell'orchestratore)."""
-    if not ORCHESTRATOR:
-        raise HTTPException(status_code=404, detail="Not Found")
-    moved = REGISTRY.get("moved") or {}
-    return {"vms": dict(PEERS), "keys": dict(KEYS),
-            "public": {k: v.get("public") or "" for k, v in REGISTRY["vms"].items()},
-            "moved_probes": moved.get("probes") or {}, "moved_users": moved.get("users") or {}}
-
-
-@app.get("/internal/is-admin", dependencies=[Depends(gateway_only)])
-async def internal_is_admin(email: str = Query(default="", max_length=254)):
-    """Per la pagina d'accesso del gateway: un'email che è solo di un amministratore va al pannello."""
-    if not ORCHESTRATOR:
-        raise HTTPException(status_code=404, detail="Not Found")
-    return {"found": await asyncio.to_thread(auth.is_admin_email, email)}
-
-
-def vm_key_ok(vm: str, key: str) -> bool:
-    return bool(vm in KEYS and key and hmac.compare_digest(key, KEYS[vm]))
-
-
-class VmJoin(BaseModel):
-    token: str = Field(max_length=200)
-    url: str = Field(max_length=200)          # indirizzo della VM sulla rete privata, es. http://10.132.0.5:8000
-    public: str = Field(default="", max_length=200)   # indirizzo pubblico della VM, es. https://vm1.dominio.it
-
-
-def local_ip_towards(host: str) -> str:
-    """IP di questa macchina verso la VM (rete privata): è quello da cui le arriveranno le richieste
-    del gateway, quindi va nel suo TRUSTED_PROXIES. Nessun pacchetto parte davvero (UDP)."""
-    import socket
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as so:
-            so.connect((host, 9))
-            return so.getsockname()[0]
-    except OSError:
-        return ""
-
-
-def common_settings() -> dict:
-    """Impostazioni uguali su tutte le VM: le riceve una VM quando si collega."""
-    keys = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "TELEGRAM_BOT_TOKEN")
-    # l'invio email in uso (quello del pannello, se scelto) finisce nel .env della VM nuova
-    return {k: smtp_value(k) if k.startswith("SMTP_") else os.getenv(k, "").strip() for k in keys}
-
-
-@app.post("/api/vm/join")
-async def api_vm_join(b: VmJoin, request: Request):
-    """Una VM probe si collega con il token generato dal pannello. Risponde con nome, chiave
-    personale e impostazioni comuni; il token vale una volta sola."""
-    if not ORCHESTRATOR:
-        raise HTTPException(status_code=404, detail="Not Found")
-    ip = client_ip(request)
-    too_many("join:" + ip)
-    token = b.token.strip()
-    name = token.removeprefix("nmvm_").partition(".")[0]
-    pending = REGISTRY["tokens"].get(name) if token.startswith("nmvm_") else None
-    digest = hashlib.sha256(token.encode()).hexdigest()
-    if not pending or not hmac.compare_digest(digest, pending.get("hash", "")) or pending.get("expires", 0) < time.time():
-        throttle.fail("join:" + ip)
-        log.warning("Collegamento di una VM rifiutato da %s: token non valido o scaduto", ip)
-        raise HTTPException(status_code=403, detail="Token non valido o scaduto: generane uno nuovo dal pannello.")
-    parts = urlsplit(b.url.strip().rstrip("/"))
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.path or parts.query:
-        raise HTTPException(status_code=422, detail="Indirizzo della VM non valido (es. http://10.132.0.5:8000).")
-    url = f"{parts.scheme}://{parts.hostname}:{parts.port or 8000}"
-    if any(u == url for k, u in PEERS.items() if k != name):
-        raise HTTPException(status_code=409, detail=f"L'indirizzo {url} è già di un'altra VM.")
-    public = ""
-    if b.public.strip():
-        pp = urlsplit(b.public.strip().rstrip("/"))
-        # solo https: sonde e utenti ci mandano token e password (installa-server.sh manda sempre https://)
-        if pp.scheme != "https" or not pp.hostname or pp.path or pp.query:
-            raise HTTPException(status_code=422, detail="Indirizzo pubblico della VM non valido (es. https://vm1.dominio.it).")
-        public = f"{pp.scheme}://{pp.netloc.lower()}"
-    key = secrets.token_urlsafe(32)
-
-    def change(reg):
-        reg["tokens"].pop(name, None)
-        reg["vms"][name] = {"url": url, "key": key, "added": time.time(), "public": public}
-    await asyncio.to_thread(save_registry, change)
-    log.warning("VM %s collegata (%s) da %s", name, url, ip)
-    await asyncio.to_thread(admin_notice, f"[INFO] VM {name} collegata",
-                            f"La VM {name} ({url}) si è collegata con il suo token.")
-    asyncio.create_task(sync_new_vm(name))
-    return {"vm_id": name, "key": key, "gateway_ip": await asyncio.to_thread(local_ip_towards, parts.hostname),
-            "public_url": public_base(request), "settings": common_settings()}
-
-
-async def sync_new_vm(name: str):
-    """Appena la VM nuova risponde le si copiano la conservazione dei dati e l'invio email (per 30
-    minuti al massimo)."""
-    who = {"login": "orchestratore", "name": "orchestratore"}
-    for _ in range(60):
-        await asyncio.sleep(30)
-        if name not in PEERS:
-            return
-        if await asyncio.to_thread(push_retention, name, who):
-            await asyncio.to_thread(push_smtp, name, who)      # e l'invio email scelto dal pannello
-            return
-
-
-class VmNotice(BaseModel):
-    vm: str = Field(max_length=16)
-    key: str = Field(max_length=200)
-    title: str = Field(max_length=300)
-    body: str = Field(default="", max_length=4000)
-    kind: str = Field(max_length=20)
-    critical: bool = False
-
-
-@app.post("/api/vm/notice")
-async def api_vm_notice(b: VmNotice):
-    """Avviso amministrativo di una VM probe: lo ricevono gli amministratori dell'orchestratore."""
-    if not ORCHESTRATOR or not vm_key_ok(b.vm, b.key):
-        raise HTTPException(status_code=404, detail="Not Found")
-    title = f"{b.title} (VM {b.vm})"
-    await asyncio.to_thread(add_event, title, b.body[:2000], not b.critical, None)
-    await asyncio.to_thread(admin_send_local, title, b.body, b.kind if b.kind in ADMIN_KINDS else "manutenzione",
-                            b.critical)
-    return {"ok": True}
-
-
-class VmWhere(BaseModel):
-    vm: str = Field(max_length=16)
-    key: str = Field(max_length=200)
-    email: str = Field(max_length=254)
-
-
-@app.post("/api/vm/where")
-async def api_vm_where(b: VmWhere):
-    """Accesso sulla VM sbagliata: la VM chiede su quale altra VM vive l'account (solo le VM, con la loro chiave)."""
-    if not ORCHESTRATOR or not vm_key_ok(b.vm, b.key):
-        raise HTTPException(status_code=404, detail="Not Found")
-    email = normalize_email(b.email)
-    path = "/internal/has-user?email=" + quote(email, safe="")
-    for name in [n for n in PEERS if n != b.vm]:
-        st, data = await asyncio.to_thread(peer_request, name, "GET", path, None, None, 5)
-        if st == 200 and data.get("found") and public_of(name):
-            return {"vm": name, "url": public_of(name)}
-    return {"vm": None, "url": ""}
-
-
-def where_else(email: str) -> str:
-    """Indirizzo della VM dove vive davvero l'account, se non è questa (chiesto all'orchestratore)."""
-    import urllib.request
-    base = os.getenv("GATEWAY_URL", "").strip().rstrip("/")
-    if not (VM_ID and GATEWAY_SECRET and base):
-        return ""
-    req = urllib.request.Request(base + "/api/vm/where", method="POST", headers={"Content-Type": "application/json"},
-                                 data=json.dumps({"vm": VM_ID, "key": GATEWAY_SECRET, "email": email}).encode())
-    try:
-        with urllib.request.urlopen(req, timeout=8) as r:
-            url = str(json.loads(r.read() or b"{}").get("url") or "")
-    except (OSError, ValueError) as exc:
-        log.warning("Non so dove vive l'account %s (l'orchestratore non risponde: %s)", email, exc)
-        return ""
-    return url.rstrip("/") if url.startswith(("https://", "http://")) else ""
-
-
-@app.get("/internal/has-user", dependencies=[Depends(gateway_only)])
-async def internal_has_user(email: str = Query(max_length=254)):
-    """Se l'account con questa email vive su questa VM: serve al gateway per instradare l'accesso."""
-    return {"found": await asyncio.to_thread(auth.user_exists, normalize_email(email))}
-
-
-@app.get("/internal/has-probe", dependencies=[Depends(gateway_only)])
-async def internal_has_probe(h: str = Query(min_length=64, max_length=64)):
-    """Se la sonda con questo token (impronta SHA-256) vive su questa VM: i token senza il nome della
-    VM (sonde trasferite da un server senza gateway) il gateway li instrada così."""
-    def look():
-        with auth._conn() as c:
-            return c.execute("SELECT 1 FROM probes WHERE token_hash = ?", (h.lower(),)).fetchone() is not None
-    return {"found": await asyncio.to_thread(look)}
 
 
 class InviteNew(BaseModel):
@@ -4309,12 +3839,10 @@ class InviteNew(BaseModel):
     email: str = Field(default="", max_length=254)             # se indicata: codice inviato e valido solo per lei
     max_uses: int = Field(default=1, ge=0, le=1000)          # 0 = senza limite
     days: Optional[float] = Field(default=7, ge=0, le=3650)  # None o 0 = senza scadenza
-    vm: str = Field(default="", max_length=16)               # più VM: dove nascerà l'utente (vuoto = questa)
 
 
 class InviteDelete(BaseModel):
     id: int
-    vm: str = Field(default="", max_length=16)
 
 
 class RotateBody(BaseModel):
@@ -4350,7 +3878,7 @@ def fmt_when(ts):
 
 
 def users_list():
-    """Utenti di questa VM per il pannello, con FRITZ!Box e dispositivi delle loro sonde."""
+    """Utenti del server per il pannello, con FRITZ!Box e dispositivi delle loro sonde."""
     # FRITZ!Box collegati per utente: quelli che le sue sonde leggono adesso (il primo più gli altri)
     # e dispositivi: quelli della configurazione di ogni sonda (compresi in pausa e oltre il
     # limite), oppure, se la sonda non l'ha ancora mandata, quelli che sta misurando
@@ -4371,7 +3899,6 @@ def users_list():
         u["active"] = bool(u["sessions"]) and bool(u["last_seen"]) and now - u["last_seen"] < 600
         u["created_ts"], u["last_seen_ts"] = u["created"], u["last_seen"]       # per ordinare la tabella
         u["created"], u["last_seen"] = fmt_when(u["created"]), fmt_when(u["last_seen"])
-        u["vm"] = VM_ID
         # max_probes / max_fritz restano None quando non scelti: la pagina mostra il default.
         # Con un piano FRITZ!Box e dispositivi sono quelli del piano.
         if u.get("plan") in PLANS:
@@ -4382,49 +3909,19 @@ def users_list():
     return users
 
 
-def moved_users_heal(where):
-    """Spostamenti ricordati che non valgono più: l'utente ora vive su un'altra VM (per esempio
-    eliminato e reimportato da backup). where: email -> VM dove c'è adesso."""
-    moved = (REGISTRY.get("moved") or {}).get("users") or {}
-    stale = [e for e, vm in moved.items() if where.get(e) and where[e] != vm]
-    if not stale:
-        return
-
-    def change(reg):
-        for e in stale:
-            reg.get("moved", {}).get("users", {}).pop(e, None)
-    save_registry(change)
-    log.info("Spostamenti superati tolti (utenti ora su un'altra VM): %s", ", ".join(stale))
-
-
 @app.get("/api/admin/overview")
 async def api_admin_overview(adm: dict = Depends(admin_user)):
-    """Utenti, codici di accesso, amministratori e impostazioni della registrazione: con più VM,
-    utenti e codici di tutte (ognuno con la sua VM)."""
+    """Utenti, codici di accesso, amministratori e impostazioni della registrazione."""
     def collect():
-        return users_list(), auth.list_invites(), auth.list_admins()
+        return users_list(), fmt_invites(auth.list_invites()), auth.list_admins()
     users, invites, admins = await asyncio.to_thread(collect)
     inactive = await asyncio.to_thread(inactive_public)
-    for i in fmt_invites(invites):
-        i["vm"] = VM_ID
-    vms = [{"name": VM_ID, "users": len(users), "probes": sum(u["probes"] for u in users), "ok": True, "me": True}] if VM_ID else []
-    for name, other in (await peers_invites()).items():
-        if other is None:
-            vms.append({"name": name, "ok": False})
-            continue
-        vms.append({"name": name, "users": other["users"], "probes": other["probes"], "ok": True})
-        invites += [dict(i, vm=name) for i in other["invites"]]
-        users += [dict(u, vm=name) for u in other.get("user_list") or []]
-        inactive += [dict(u, vm=name) for u in other.get("inactive") or []]
-    vms.sort(key=lambda v: v["name"])
     users.sort(key=lambda u: u["email"])
-    if ORCHESTRATOR:
-        await asyncio.to_thread(moved_users_heal, {normalize_email(u["email"]): u.get("vm") for u in users})
     for a in admins:
         a["me"] = a["login"] == adm["login"]
         a["created"], a["last_seen"], a["mfa_since"] = fmt_when(a["created"]), fmt_when(a["last_seen"]), fmt_when(a["mfa_since"])
-    return {"admin": adm["login"], "users": users, "invites": invites, "admins": admins, "vms": vms,
-            "inactive": inactive, "inactive_days": INACTIVE_DAYS, "control": CONTROL_NAME}
+    return {"admin": adm["login"], "users": users, "invites": invites, "admins": admins,
+            "inactive": inactive, "inactive_days": INACTIVE_DAYS}
 
 
 def fmt_invites(invites):
@@ -4445,8 +3942,6 @@ def public_base(request: Request) -> str:
 
 @app.post("/api/admin/invites/new")
 async def api_invite_new(b: InviteNew, request: Request, adm: dict = Depends(invite_admin)):
-    if (fwd := await on_peer(b.vm, "/api/admin/invites/new", b, adm)) is not None:
-        return fwd
     email = normalize_email(b.email)
     if email and not valid_email(email):
         raise HTTPException(status_code=422, detail="L'email non è in un formato valido.")
@@ -4534,8 +4029,6 @@ async def api_invite_resend(b: InviteDelete, request: Request, adm: dict = Depen
     chi avesse ancora il vecchio link deve usare quello nuovo. Se il vecchio era scaduto, il nuovo
     riparte con 7 giorni, altrimenti conserva la scadenza che restava.
     """
-    if (fwd := await on_peer(b.vm, "/api/admin/invites/resend", b, adm)) is not None:
-        return fwd
     old = await asyncio.to_thread(auth.get_invite, b.id)
     if old is None:
         raise HTTPException(status_code=404, detail="Codice non trovato.")
@@ -4561,7 +4054,6 @@ async def api_invite_resend(b: InviteDelete, request: Request, adm: dict = Depen
 
 class UserCode(BaseModel):
     id: int
-    vm: str = Field(default="", max_length=16)
 
 
 @app.post("/api/admin/users/code")
@@ -4591,7 +4083,6 @@ async def api_user_code(b: UserCode, request: Request, adm: dict = Depends(invit
 class InviteEmail(BaseModel):
     id: int
     email: str = Field(max_length=254)
-    vm: str = Field(default="", max_length=16)
 
 
 @app.post("/api/admin/invites/email")
@@ -4603,8 +4094,6 @@ async def api_invite_email(b: InviteEmail, request: Request, adm: dict = Depends
     vecchio. Vale anche per un codice a una registrazione senza email: gli si lega l'indirizzo.
     Un codice per piu' registrazioni non si lega a una persona sola: va creato un invito nuovo.
     """
-    if (fwd := await on_peer(b.vm, "/api/admin/invites/email", b, adm)) is not None:
-        return fwd
     email = normalize_email(b.email)
     if not valid_email(email):
         raise HTTPException(status_code=422, detail="L'email non è in un formato valido.")
@@ -4639,8 +4128,6 @@ async def api_invite_email(b: InviteEmail, request: Request, adm: dict = Depends
 
 @app.post("/api/admin/invites/delete")
 async def api_invite_delete(b: InviteDelete, adm: dict = Depends(invite_admin)):
-    if (fwd := await on_peer(b.vm, "/api/admin/invites/delete", b, adm)) is not None:
-        return fwd
     if not await asyncio.to_thread(auth.delete_invite, b.id):
         raise HTTPException(status_code=404, detail="Codice non trovato.")
     log.info("Codice di accesso %d eliminato da %s", b.id, adm["login"])
@@ -4778,8 +4265,6 @@ async def api_admin_profile(b: AdminProfile, adm: dict = Depends(admin_user)):
 @app.post("/api/admin/profile/lang")
 async def api_admin_profile_lang(b: LangBody, adm: dict = Depends(admin_user)):
     """La tua lingua: pannello di amministrazione e avvisi che ricevi."""
-    if adm.get("forwarded"):
-        raise HTTPException(status_code=422, detail="Il tuo account è sul gateway.")
     await asyncio.to_thread(auth.set_admin_lang, adm["id"], b.lang)
     resp = JSONResponse({"ok": True, "lang": b.lang})
     resp.set_cookie(ADMIN_LANG_COOKIE, b.lang, max_age=365 * 86400, secure=COOKIE_SECURE, samesite="lax", path="/")
@@ -4789,8 +4274,6 @@ async def api_admin_profile_lang(b: LangBody, adm: dict = Depends(admin_user)):
 @app.post("/api/admin/profile/tz")
 async def api_admin_profile_tz(b: TzBody, adm: dict = Depends(admin_user)):
     """Il tuo fuso orario: orari del pannello (vuoto = quello del server)."""
-    if adm.get("forwarded"):
-        raise HTTPException(status_code=422, detail="Il tuo account è sul gateway.")
     if b.tz and tz_named(b.tz) is None:
         raise HTTPException(status_code=422, detail="Fuso orario sconosciuto.")
     await asyncio.to_thread(auth.set_admin_tz, adm["id"], b.tz)
@@ -4902,10 +4385,6 @@ def user_tz(user):
 
 async def check_admin_pw(adm, password, request):
     """Le azioni delicate chiedono di nuovo la password dell'amministratore."""
-    if adm.get("forwarded"):
-        if adm.get("pw_checked"):
-            return                                    # l'ha già controllata l'orchestratore
-        raise HTTPException(status_code=401, detail="La password di amministratore non è corretta.")
     ip = client_ip(request)
     admin_too_many("ip:" + ip)
     if not await asyncio.to_thread(auth.check_admin_password, adm["id"], password):
@@ -4924,8 +4403,6 @@ async def check_admin_code(adm, code, request):
     di posta, cioe' esattamente il canale che un secondo fattore dovrebbe tenere fuori. Chi ha
     accesso completo al pannello l'app ce l'ha per forza: senza, l'accesso si ferma prima.
     """
-    if adm.get("forwarded"):
-        raise HTTPException(status_code=403, detail="Azione possibile solo sulla VM di controllo.")
     ip = client_ip(request)
     admin_too_many("ip:" + ip)
     outcome = await asyncio.to_thread(auth.totp_check, adm["id"], (code or "").strip())
@@ -5144,7 +4621,6 @@ async def api_user_delete(b: UserDelete, request: Request, adm: dict = Depends(a
 class InactiveWipe(BaseModel):
     id: str = Field(max_length=32)
     password: str = Field(default="", max_length=256)
-    vm: str = Field(default="", max_length=40)
 
 
 @app.post("/api/admin/users/inactive/wipe")
@@ -5162,7 +4638,7 @@ async def api_inactive_wipe(b: InactiveWipe, request: Request, adm: dict = Depen
 
 # ------------------------------------------------------------------ trasferimento di un utente
 # Un utente con le sue sonde e tutto lo storico, in uno zip che un altro server netmon importa
-# (dalla 2.1 alla 1.0 con il gateway, o da una VM a un'altra). A differenza di «Scarica i miei dati»
+# (per esempio da un server NetMon completo a NetMon Light). A differenza di «Scarica i miei dati»
 # contiene le impronte della password e dei token: l'utente entra con la stessa password e le sonde
 # continuano a funzionare senza toccarle. Per questo lo scarica solo un amministratore, con la
 # sua password, e va trattato come un segreto.
@@ -5323,10 +4799,9 @@ def xfer_decrypt(src, dst, password):
         if not ok:
             Path(dst).unlink(missing_ok=True)
 
-# Esportazione e importazione dal pannello. Sull'orchestratore il pannello le chiede alla VM
-# dell'utente (o a quella scelta per importare) come le altre azioni; il lavoro gira in sottofondo
-# sulla VM e il pannello ne segue l'esito, perché con molto storico dura più di una richiesta.
-# Lo zip da importare arriva a pezzi (sotto il limite di 10 MB di Caddy e del gateway).
+# Esportazione e importazione dal pannello: il lavoro gira in sottofondo e il pannello ne segue
+# l'esito, perché con molto storico dura più di una richiesta.
+# Lo zip da importare arriva a pezzi (sotto il limite di 10 MB di Caddy).
 TRANSFER_DIR = DATA_DIR / "upload" / "trasferimenti"
 TRANSFER_PART = 8 * 1024 * 1024
 TRANSFER_MAX = 4 * 1024 ** 3
@@ -5391,7 +4866,7 @@ def transfer_preview(path):
                 c.execute("SELECT key, name FROM probes WHERE owner = ? ORDER BY name", (row[0],))] if row else []
     return {"email": email, "source_version": man.get("source_version"), "created": fmt_when(man.get("created")),
             "probes": [p.get("name") or p["key"] for p in acc["probes"]], "rows": man.get("rows") or {},
-            "exists": row is not None, "clash": clash, "vm": VM_ID,
+            "exists": row is not None, "clash": clash,
             "source": [{"key": p["key"], "name": p.get("name") or p["key"]} for p in acc["probes"]],
             "target": mine, "suggested": transfer_suggest(acc["probes"], mine) if row else {}}
 
@@ -5613,23 +5088,7 @@ def transfer_file(tid):
 
 @app.get("/api/admin/transfer/download")
 async def api_transfer_download(request: Request, id: str = Query(max_length=64), adm: dict = Depends(admin_user)):
-    """Lo zip esportato. Sull'orchestratore lo prende dalla VM indicata (X-Netmon-VM) e lo passa."""
-    vm = request.headers.get("x-netmon-vm", "").strip().lower()
-    if ORCHESTRATOR and vm not in ("", CONTROL_NAME):
-        if vm not in PEERS or not _TRANSFER_ID.fullmatch(id):
-            raise HTTPException(status_code=422, detail=f"VM sconosciuta: {vm}.")
-        fd, tmp = tempfile.mkstemp(prefix=".export-", suffix=".zip", dir=DATA_DIR)
-        os.close(fd)
-
-        def fetch():
-            return peer_fetch(vm, f"/api/admin/transfer/download?id={id}", as_admin(adm), tmp)
-        try:
-            name = await asyncio.to_thread(fetch)
-        except BaseException:
-            os.unlink(tmp)
-            raise
-        return FileResponse(tmp, media_type="application/octet-stream", filename=name,
-                            headers={"Cache-Control": "no-store"}, background=BackgroundTask(os.unlink, tmp))
+    """Il file di trasferimento esportato (cifrato)."""
     t = transfer_file(id)
     log.warning("File di trasferimento %s scaricato da %s", t["name"], adm["login"])
     return FileResponse(t["file"], media_type="application/octet-stream", filename=t["name"],
@@ -5714,8 +5173,6 @@ class TransferImport(BaseModel):
 async def api_transfer_import(b: TransferImport, request: Request, adm: dict = Depends(admin_user)):
     """Importa lo zip caricato: l'utente rientra con la sua password e le sonde con il loro token."""
     await check_admin_pw(adm, b.password, request)
-    if ORCHESTRATOR:
-        raise HTTPException(status_code=422, detail="Scegli la VM su cui importare l'utente.")
     whole = TRANSFER_DIR / f"in-{b.id}" / "zip"
     if not _TRANSFER_ID.fullmatch(b.id) or not whole.exists():
         raise HTTPException(status_code=404, detail="File non trovato (caricato più di 2 ore fa?): caricalo di nuovo.")
@@ -5737,420 +5194,28 @@ async def api_transfer_import(b: TransferImport, request: Request, adm: dict = D
             await asyncio.to_thread(shutil.rmtree, whole.parent, True)
             log.warning("Storico di %s importato da %s (%s, %d sonde, %d righe)", pv["email"], adm["login"],
                         "sovrascritto" if b.history == "overwrite" else "unito", len(mapping), rows)
-            return {"email": pv["email"], "probes": len(mapping), "vm": VM_ID, "history": b.history, "rows": rows}
+            return {"email": pv["email"], "probes": len(mapping), "history": b.history, "rows": rows}
         asyncio.create_task(transfer_run(tid, "import", merge))
         return {"ok": True, "id": tid}
     tid = transfer_new("import", adm, file=str(whole))
 
     async def work():
         uid, email, keys, state = await asyncio.to_thread(transfer_import, whole)
-        await asyncio.to_thread(moved_forget, email, await asyncio.to_thread(user_token_hashes, uid))
         async with lock:
             for k, st in state.items():
                 monitor.state[k] = st
             save_state()
         await asyncio.to_thread(shutil.rmtree, whole.parent, True)
         log.warning("Utente %s importato da %s con %d sonde", email, adm["login"], len(keys))
-        return {"email": email, "probes": len(keys), "vm": VM_ID}
+        return {"email": email, "probes": len(keys)}
     asyncio.create_task(transfer_run(tid, "import", work))
     return {"ok": True, "id": tid}
-
-
-# ------------------------------------------------------------------ spostamento di un utente tra VM
-# Dal pannello dell'orchestratore: «Sposta su un'altra VM». L'orchestratore controlla lo spazio
-# sulla VM di arrivo, ferma le misure delle sonde sulla VM di partenza (le sonde le tengono da parte
-# e le rimandano dopo), esporta l'utente, porta lo zip alla VM di arrivo, lo importa e solo alla
-# fine lo toglie dalla VM di partenza. Lì restano due promemoria: le sonde che si presentano
-# ricevono il nuovo indirizzo (410 con «moved», e la sonda corregge da sola config.yaml) e chi
-# prova ad accedere viene mandato alla VM nuova. Il token delle sonde non cambia.
-MOVE_FILE = DATA_DIR / "spostati.json"
-MOVE_FREEZE = 3 * 3600                    # misure ferme al massimo per 3 ore se lo spostamento si interrompe
-MOVE_PROBE_SINCE = "20261013-144004"      # sonde da questa versione in poi seguono il nuovo indirizzo da sole
-PROBE_PATHS = ("/api/report", "/api/backfill", "/api/probe-config", "/api/probe-update", "/api/probe-package")
-_moved = {"probes": {}, "users": {}}      # impronta del token -> indirizzo dei report; email -> indirizzo della VM
-_moving = {}                              # impronta del token -> fino a quando le misure aspettano
-
-
-def moved_load():
-    try:
-        data = json.loads(MOVE_FILE.read_text())
-    except FileNotFoundError:
-        return
-    except (OSError, ValueError) as exc:
-        log.error("Elenco degli utenti spostati illeggibile: %s", exc)
-        return
-    for k in ("probes", "users"):
-        if isinstance(data.get(k), dict):
-            _moved[k] = {str(a): str(b) for a, b in data[k].items()}
-
-
-def moved_save():
-    tmp = MOVE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(_moved, indent=1, sort_keys=True))
-    os.replace(tmp, MOVE_FILE)
-
-
-moved_load()
-
-
-def moved_reply(path, authorization):
-    """Risposta per una sonda spostata (410 con il nuovo indirizzo) o in spostamento (503), altrimenti None."""
-    if not (_moved["probes"] or _moving) or not path.startswith(PROBE_PATHS):
-        return None
-    tok = authorization.removeprefix("Bearer ").strip()
-    if not tok:
-        return None
-    h = hashlib.sha256(tok.encode()).hexdigest()
-    until = _moving.get(h)
-    if until and until > time.time():
-        return JSONResponse({"detail": "Sonda in spostamento su un'altra VM: le misure aspettano e arrivano dopo."},
-                            status_code=503, headers={"Retry-After": "60", **SECURITY_HEADERS})
-    url = _moved["probes"].get(h)
-    if url:
-        return JSONResponse({"detail": f"Sonda spostata: ora scrive a {url}.", "moved": url},
-                            status_code=410, headers=SECURITY_HEADERS)
-    return None
-
-
-def move_estimate(keys):
-    """Byte dello storico di queste sonde: la quota del loro numero di righe sullo spazio di ogni tabella."""
-    if not keys:
-        return 0, {}
-    marks = ",".join("?" * len(keys))
-    total, rows = 0, {}
-    with sqlite3.connect(DB_FILE, timeout=30, factory=ClosingConnection) as c:
-        try:
-            sizes = dict(c.execute("SELECT m.tbl_name, SUM(d.pgsize) FROM dbstat d JOIN sqlite_master m "
-                                   "ON m.name = d.name GROUP BY m.tbl_name"))
-        except sqlite3.Error:            # sqlite senza dbstat: il file diviso per righe
-            sizes = None
-        counts = {}
-        for t in TRANSFER_TABLES:
-            if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone():
-                continue
-            mine = c.execute(f"SELECT COUNT(*) FROM {t} WHERE probe IN ({marks})", keys).fetchone()[0]
-            counts[t] = (mine, c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
-            rows[t] = mine
-        if sizes is None:
-            file_size = DB_FILE.stat().st_size
-            all_rows = sum(n for _, n in counts.values()) or 1
-            total = file_size * sum(m for m, _ in counts.values()) / all_rows
-        else:
-            total = sum((sizes.get(t) or 0) * m / n for t, (m, n) in counts.items() if n)
-    return int(total), rows
-
-
-def move_probe_ok(version):
-    m = re.search(r"\d{8}-\d{6}", str(version or ""))
-    return bool(m) and m.group(0) >= MOVE_PROBE_SINCE
-
-
-def move_source_info(user_id):
-    user = auth.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="Utente non trovato.")
-    with auth._conn() as c:
-        probes = [{"key": r[0], "name": r[1] or r[0]} for r in
-                  c.execute("SELECT key, name FROM probes WHERE owner = ? ORDER BY name", (user_id,))]
-    for p in probes:
-        v = ((monitor.state.get(p["key"]) or {}).get("system") or {}).get("version")
-        p["version"], p["follows"] = v, move_probe_ok(v)
-    size, rows = move_estimate([p["key"] for p in probes])
-    return {"email": user["email"], "probes": probes, "bytes": size, "rows": rows,
-            "free": shutil.disk_usage(DATA_DIR).free, "vm": VM_ID}
-
-
-class MoveStep(BaseModel):
-    id: int
-    password: str = Field(default="", max_length=256)
-    url: str = Field(default="", max_length=300)          # done: dove scrivono ora le sonde
-    base: str = Field(default="", max_length=300)         # done: dove accede ora l'utente
-
-
-@app.post("/api/admin/users/move/info")
-async def api_move_info(b: MoveStep, adm: dict = Depends(admin_user)):
-    """Sulla VM di partenza: sonde, versione dei loro programmi e spazio stimato dello storico."""
-    return await asyncio.to_thread(move_source_info, b.id)
-
-
-def user_token_hashes(user_id):
-    with auth._conn() as c:
-        return [r[0] for r in c.execute("SELECT token_hash FROM probes WHERE owner = ? AND token_hash IS NOT NULL",
-                                        (user_id,))]
-
-
-@app.post("/api/admin/users/move/freeze")
-async def api_move_freeze(b: MoveStep, request: Request, adm: dict = Depends(admin_user)):
-    """Le misure delle sonde dell'utente aspettano (503): la sonda le tiene da parte e le manda dopo."""
-    await check_admin_pw(adm, b.password, request)
-    if await asyncio.to_thread(auth.get_user, b.id) is None:
-        raise HTTPException(status_code=404, detail="Utente non trovato.")
-    until = time.time() + MOVE_FREEZE
-    for h in await asyncio.to_thread(user_token_hashes, b.id):
-        _moving[h] = until
-    return {"ok": True}
-
-
-@app.post("/api/admin/users/move/cancel")
-async def api_move_cancel(b: MoveStep, request: Request, adm: dict = Depends(admin_user)):
-    await check_admin_pw(adm, b.password, request)
-    for h in await asyncio.to_thread(user_token_hashes, b.id):
-        _moving.pop(h, None)
-    return {"ok": True}
-
-
-def move_url_ok(url):
-    """Nuovo indirizzo per le sonde di un utente spostato: https://, perché le sonde ci mandano il
-    loro token (le sonde rifiutano comunque un http:// fuori dalla rete locale)."""
-    parts = urlsplit(url)
-    return parts.scheme == "https" and bool(parts.hostname) and not parts.query
-
-
-@app.post("/api/admin/users/move/done")
-async def api_move_done(b: MoveStep, request: Request, adm: dict = Depends(admin_user)):
-    """L'utente è già sulla VM di arrivo: qui si toglie con sonde e storico, lasciando il nuovo indirizzo."""
-    await check_admin_pw(adm, b.password, request)
-    if not move_url_ok(b.url) or not b.url.endswith("/api/report") or not move_url_ok(b.base):
-        raise HTTPException(status_code=422, detail="Indirizzo della VM di arrivo non valido.")
-    user = await asyncio.to_thread(auth.get_user, b.id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="Utente non trovato.")
-    hashes = await asyncio.to_thread(user_token_hashes, b.id)
-    keys = await asyncio.to_thread(registry.keys_of, b.id)
-    for h in hashes:
-        _moved["probes"][h] = b.url
-    _moved["users"][normalize_email(user["email"])] = b.base.rstrip("/")
-    await asyncio.to_thread(moved_save)
-    async with lock:
-        for key in keys:
-            monitor.state.pop(key, None)
-        save_state()
-    for key in keys:
-        await asyncio.to_thread(wipe_probe, key)
-    await asyncio.to_thread(auth.delete_user, b.id)
-    await asyncio.to_thread(drop_unused_invites, user["email"])   # un codice rimasto qui creerebbe un doppione
-    for h in hashes:
-        _moving.pop(h, None)
-    log.warning("Utente %s spostato altrove da %s con %d sonde: ora su %s", user["email"], adm["login"], len(keys), b.base)
-    return {"ok": True, "hashes": hashes, "email": normalize_email(user["email"])}
 
 
 def drop_unused_invites(email):
     with auth._conn() as c:
         c.execute("DELETE FROM invites WHERE email = ? COLLATE NOCASE AND uses = 0", (normalize_email(email),))
 
-
-def moved_forget(email, hashes):
-    """Un utente tornato su questa VM (importato): niente più rimandi altrove per lui e le sue sonde."""
-    changed = _moved["users"].pop(normalize_email(email), None) is not None
-    for h in hashes:
-        changed = _moved["probes"].pop(h, None) is not None or changed
-    if changed:
-        moved_save()
-
-
-# Sull'orchestratore: controllo dello spazio e spostamento, passo per passo, come lavoro in sottofondo
-class MoveBody(BaseModel):
-    id: int
-    vm: str = Field(max_length=16)                         # dove vive ora l'utente
-    to: str = Field(max_length=16)                         # dove va
-    password: str = Field(default="", max_length=256)
-
-
-def move_reserve(total):
-    """Spazio che deve restare libero sulla VM di arrivo anche dopo lo spostamento."""
-    return max(MIN_FREE_MB * 1024 * 1024, int((total or 0) * 0.05))
-
-
-def move_check(b: MoveBody, adm):
-    """Chi e cosa si sposta, e se c'è posto: sulla VM di arrivo servono lo zip, il database estratto
-    e le righe nuove (circa tre volte lo storico), più la riserva; sulla VM di partenza lo zip e il suo
-    database provvisorio; qui lo zip di passaggio."""
-    src, dst = b.vm.strip().lower(), b.to.strip().lower()
-    if not ORCHESTRATOR:
-        raise HTTPException(status_code=422, detail="Lo spostamento tra VM si fa dal pannello del gateway.")
-    if src not in PEERS or dst not in PEERS:
-        raise HTTPException(status_code=422, detail="VM sconosciuta.")
-    if src == dst:
-        raise HTTPException(status_code=422, detail="L'utente è già su questa VM.")
-    st, info = peer_request(src, "POST", "/api/admin/users/move/info", {"id": b.id}, as_admin(adm), 120)
-    if st != 200:
-        raise HTTPException(status_code=st or 502, detail=info.get("detail") or f"La VM {src} non risponde: riprova tra poco.")
-    st, status = peer_request(dst, "GET", "/internal/status", None, None, 15)
-    if st != 200:
-        raise HTTPException(status_code=502, detail=f"La VM {dst} non risponde: riprova tra poco.")
-    st, has = peer_request(dst, "GET", "/internal/has-user?email=" + quote(info["email"], safe=""), None, None, 15)
-    if st == 200 and has.get("found"):
-        raise HTTPException(status_code=409, detail=f"Su {dst} c'è già un account {info['email']}.")
-    size = int(info.get("bytes") or 0)
-    need_dst = 3 * size + move_reserve(status.get("disk_total"))
-    free_dst = int(status.get("disk_free") or max(0, (status.get("disk_total") or 0) - (status.get("disk_used") or 0)))
-    need_src, free_src = 2 * size + MIN_FREE_MB * 1024 * 1024, int(info.get("free") or 0)
-    need_here, free_here = size + MIN_FREE_MB * 1024 * 1024, shutil.disk_usage(DATA_DIR).free
-    problems = []
-    if free_dst < need_dst:
-        problems.append(f"Su {dst} non c'è abbastanza spazio: servono {fmt_bytes(need_dst)}, liberi {fmt_bytes(free_dst)}.")
-    if free_src < need_src:
-        problems.append(f"Su {src} non c'è spazio per preparare lo zip: servono {fmt_bytes(need_src)}, "
-                        f"liberi {fmt_bytes(free_src)}.")
-    if free_here < need_here:
-        problems.append(f"Sul gateway non c'è spazio per lo zip di passaggio: servono {fmt_bytes(need_here)}, "
-                        f"liberi {fmt_bytes(free_here)}.")
-    return {"email": info["email"], "from": src, "to": dst, "probes": info["probes"], "rows": info.get("rows") or {},
-            "bytes": size, "need": need_dst, "free": free_dst, "ok": not problems, "problems": problems,
-            "behind": [p["name"] for p in info["probes"] if not p.get("follows")]}
-
-
-def fmt_bytes(n):
-    """Come fmtBytes nel pannello: 1,2 GB, 350 MB, 12 kB."""
-    n = float(n or 0)
-    if n >= 1e9:
-        return f"{n / 1e9:.1f} GB".replace(".", ",")
-    return f"{n / 1e6:.0f} MB" if n >= 1e6 else f"{n / 1e3:.0f} kB"
-
-
-@app.post("/api/admin/move/check")
-async def api_move_check(b: MoveBody, adm: dict = Depends(admin_user)):
-    return await asyncio.to_thread(move_check, b, adm)
-
-
-def peer_fetch(vm, path, headers, dest):
-    """Scarica un file da una VM in `dest`; restituisce il nome che la VM gli dà."""
-    import urllib.error
-    import urllib.request
-    req = urllib.request.Request(PEERS[vm] + path, headers={"X-Netmon-Gateway": KEYS.get(vm, ""), **headers})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
-            shutil.copyfileobj(r, f, 1024 * 1024)
-            name = re.search(r'filename="?([^";]+)', r.headers.get("Content-Disposition", ""))
-            return name.group(1) if name else "netmon-trasferimento.zip"
-    except urllib.error.HTTPError as e:
-        try:
-            detail = json.loads(e.read() or b"{}").get("detail")
-        except ValueError:
-            detail = None
-        raise HTTPException(status_code=e.code, detail=detail or f"Errore {e.code} dalla VM {vm}.")
-    except OSError:
-        raise HTTPException(status_code=502, detail=f"La VM {vm} non risponde: riprova tra poco.")
-
-
-def move_user(b: MoveBody, adm, t, gateway_base):
-    """Lo spostamento vero e proprio (in un thread). t: il lavoro in corso, per il passo mostrato nel pannello."""
-    check = move_check(b, adm)
-    if not check["ok"]:
-        raise HTTPException(status_code=409, detail=" ".join(check["problems"]))
-    src, dst, email = check["from"], check["to"], check["email"]
-    hdr = as_admin(adm, True)
-
-    def call(vm, path, payload, timeout=60):
-        st, data = peer_request(vm, "POST", path, {**payload, "password": ""}, hdr, timeout)
-        if st != 200:
-            raise HTTPException(status_code=st or 502, detail=data.get("detail") or f"La VM {vm} non risponde: riprova tra poco.")
-        return data
-
-    def wait(vm, tid):
-        misses, deadline = 0, time.time() + 6 * 3600
-        while time.time() < deadline:
-            time.sleep(2)
-            st, j = peer_request(vm, "GET", "/api/admin/transfer/job?id=" + tid, None, as_admin(adm), 30)
-            if st == 200 and j.get("state") == "done":
-                return j.get("result") or {}
-            if st == 200 and j.get("state") == "error":
-                raise HTTPException(status_code=422, detail=f"{vm}: {j.get('detail')}")
-            misses = 0 if st == 200 else misses + 1
-            if misses > 30:
-                raise HTTPException(status_code=502, detail=f"La VM {vm} non risponde più.")
-        raise HTTPException(status_code=504, detail=f"{vm}: tempo scaduto.")
-
-    t["step"] = f"Metto in attesa le misure delle sonde su {src}…"
-    call(src, "/api/admin/users/move/freeze", {"id": b.id})
-    TRANSFER_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp = TRANSFER_DIR / f"sposta-{secrets.token_hex(8)}.netmon"
-    try:
-        t["step"] = f"Preparo lo zip su {src}…"
-        fpw = secrets.token_urlsafe(32)            # il file viaggia cifrato anche qui; la password non esce da questa funzione
-        eid = call(src, "/api/admin/transfer/export", {"id": b.id, "file_password": fpw})["id"]
-        exp = wait(src, eid)
-        # misura vera dello storico: si ricontrolla lo spazio prima di portarlo
-        st, status = peer_request(dst, "GET", "/internal/status", None, None, 15)
-        need = int(exp.get("size") or 0) + 2 * int(exp.get("db_bytes") or 0) + move_reserve(status.get("disk_total"))
-        if st == 200 and int(status.get("disk_free") or 0) < need:
-            raise HTTPException(status_code=409, detail=f"Su {dst} non c'è abbastanza spazio: servono "
-                                                        f"{fmt_bytes(need)}, liberi {fmt_bytes(status.get('disk_free'))}.")
-        t["step"] = f"Copio lo zip da {src}…"
-        peer_fetch(src, "/api/admin/transfer/download?id=" + eid, as_admin(adm), tmp)
-        nid = secrets.token_urlsafe(18)
-        total = tmp.stat().st_size
-        parts = max(1, -(-total // TRANSFER_PART))
-        preview, encrypted = None, False
-        with open(tmp, "rb") as f:
-            for i in range(parts):
-                t["step"] = f"Porto lo zip su {dst}… {i * 100 // parts}%"
-                st, res = peer_request(dst, "POST", f"/api/admin/transfer/upload?id={nid}&part={i}&parts={parts}", None,
-                                       as_admin(adm), 120, (f.read(TRANSFER_PART), "application/octet-stream"))
-                if st != 200:
-                    raise HTTPException(status_code=st or 502, detail=res.get("detail") or f"La VM {dst} non risponde.")
-                preview = res.get("preview") or preview
-                encrypted = res.get("encrypted") or False
-        if encrypted:
-            preview = call(dst, "/api/admin/transfer/open", {"id": nid, "file_password": fpw}, 600).get("preview")
-        if not preview or preview.get("exists") or preview.get("clash"):
-            raise HTTPException(status_code=409, detail=f"Su {dst} c'è già questo account o una delle sue sonde.")
-        t["step"] = f"Importo su {dst}…"
-        wait(dst, call(dst, "/api/admin/transfer/import", {"id": nid})["id"])
-    except BaseException:
-        try:
-            call(src, "/api/admin/users/move/cancel", {"id": b.id})
-        except HTTPException as exc:
-            log.error("Spostamento di %s: misure non riattivate su %s (%s): ripartono da sole tra %d ore",
-                      email, src, exc.detail, MOVE_FREEZE // 3600)
-        raise
-    finally:
-        tmp.unlink(missing_ok=True)
-    # l'utente è sulla VM di arrivo: si toglie da quella di partenza
-    t["step"] = f"Tolgo {email} da {src}…"
-    base = public_of(dst) or gateway_base
-    done = None
-    for attempt in range(5):
-        try:
-            done = call(src, "/api/admin/users/move/done", {"id": b.id, "url": base + "/api/report", "base": base}, 120)
-            break
-        except HTTPException as exc:
-            if attempt == 4:
-                raise HTTPException(status_code=502, detail=f"{email} è già su {dst}, ma non è stato tolto da {src} "
-                                                            f"({exc.detail}): eliminalo da {src} con «Elimina» "
-                                                            "e «anche sonde e dati».")
-            time.sleep(10)
-
-    def change(reg):
-        moved = reg.setdefault("moved", {"probes": {}, "users": {}})
-        for h in done.get("hashes") or []:
-            moved["probes"][h] = dst
-        moved["users"][email] = dst
-    save_registry(change)
-    log.warning("Utente %s spostato da %s a %s da %s", email, src, dst, adm["login"])
-    return {"email": email, "from": src, "to": dst, "probes": len(check["probes"]), "rows": check["rows"],
-            "size": exp.get("size"), "behind": check["behind"]}
-
-
-@app.post("/api/admin/move")
-async def api_move(b: MoveBody, request: Request, adm: dict = Depends(admin_user)):
-    """Sposta un utente con sonde e storico da una VM a un'altra (solo sull'orchestratore)."""
-    await check_admin_pw(adm, b.password, request)
-    if not ORCHESTRATOR:
-        raise HTTPException(status_code=422, detail="Lo spostamento tra VM si fa dal pannello del gateway.")
-    gateway_base = public_base(request)
-    # controllato qui, prima di copiare l'utente: alla fine (move/done) sarebbe tardi
-    if not move_url_ok(public_of((b.to or "").strip().lower()) or gateway_base):
-        raise HTTPException(status_code=422, detail="La VM di arrivo non ha un indirizzo https://: "
-                                                    "le sonde non ci manderebbero il loro token.")
-    tid = transfer_new("move", adm)
-    t = _transfers[tid]
-
-    async def work():
-        return await asyncio.to_thread(move_user, b, adm, t, gateway_base)
-    asyncio.create_task(transfer_run(tid, "move", work))
-    return {"ok": True, "id": tid}
 
 # ------------------------------------------------------------------ aggiornamenti programmati (VM e sonde)
 # Un amministratore programma un aggiornamento per una data e un'ora (o per subito). Il watchdog lo
@@ -6627,11 +5692,10 @@ async def _poll_package(s, now):
 
 
 # ------------------------------------------------------------------ campagne del pannello
-# Un aggiornamento lanciato dal pannello tocca più programmazioni: la VM (o tutte le VM) e le loro
+# Un aggiornamento lanciato dal pannello tocca più programmazioni: il server e le sue
 # sonde. Prima ognuna mandava le sue email agli amministratori (creazione, promemoria, esito della
 # VM, una per ogni sonda non riuscita): con molte sonde, centinaia di email. Ora hanno tutte lo
-# stesso codice di campagna e nessuna avvisa gli amministratori da sola: la macchina da cui si usa
-# il pannello (il gateway, o il server se è uno solo) manda UN riepilogo alla programmazione, UNO
+# stesso codice di campagna e nessuna avvisa gli amministratori da sola: il server manda UN riepilogo alla programmazione, UNO
 # un'ora prima e UNO con l'esito di tutto. Gli utenti ricevono gli avvisi di sempre.
 SCHED_BATCH_KEY = "sched_batches"
 BATCH_PATTERN = r"^[0-9a-f]{16}$"
@@ -6660,25 +5724,10 @@ def sched_batch_local(bid):
     return out
 
 
-@app.get("/internal/sched-batch", dependencies=[Depends(gateway_only)])
-async def internal_sched_batch(id: str = Query(pattern=BATCH_PATTERN)):
-    return {"items": await asyncio.to_thread(sched_batch_local, id)}
-
-
-def sched_here_name():
-    return CONTROL_NAME or VM_ID or "server"
-
-
 def sched_batch_collect(bid):
-    """{macchina: elenco delle sue programmazioni nella campagna, oppure None se non risponde}."""
-    data = {sched_here_name(): sched_batch_local(bid)}
-    if IS_CONTROL:
-        for vm in PEERS:
-            st, res = peer_request(vm, "GET", "/internal/sched-batch?id=" + bid, None, None, 15)
-            if st == 404:
-                continue             # VM di una versione precedente: le sue email le manda lei, come prima
-            data[vm] = res.get("items") if st == 200 else None
-    return {vm: items for vm, items in data.items() if items is None or items}
+    """{"server": elenco delle programmazioni della campagna}, vuoto se non ce ne sono."""
+    items = sched_batch_local(bid)
+    return {"server": items} if items else {}
 
 
 def _batches():
@@ -6925,92 +5974,6 @@ async def api_admin_probes(adm: dict = Depends(admin_user)):
             "dist_same": await asyncio.to_thread(probe_dist_same)}
 
 
-# Con più VM il pannello del gateway mostra le sonde di tutte e ne programma l'aggiornamento su
-# ognuna: chiede a ogni VM, a nome dell'amministratore, e unisce le risposte (ogni riga con la sua VM).
-@app.get("/api/admin/probes/all")
-async def api_admin_probes_all(adm: dict = Depends(admin_user)):
-    if not IS_CONTROL:
-        raise HTTPException(status_code=422, detail="Si chiede al pannello del gateway.")
-    here = await api_admin_probes(adm)
-    me = CONTROL_NAME or ""
-    probes = [dict(p, vm=me) for p in here["probes"]]
-    schedules = [dict(x, vm=me) for x in here["schedules"] if x.get("target") != "vm"]
-    dist = {me: {"version": here["dist_version"], "same": here["dist_same"]}}
-    down = []
-
-    async def one(vm):
-        return vm, await asyncio.to_thread(peer_request, vm, "GET", "/api/admin/probes", None, as_admin(adm), 15)
-    for vm, (status, data) in await asyncio.gather(*(one(vm) for vm in PEERS)):
-        if status != 200:
-            down.append(vm)
-            continue
-        probes += [dict(p, vm=vm) for p in data.get("probes") or []]
-        schedules += [dict(x, vm=vm) for x in data.get("schedules") or [] if x.get("target") != "vm"]
-        dist[vm] = {"version": data.get("dist_version"), "same": data.get("dist_same") or []}
-    probes.sort(key=lambda x: (x["vm"], x["owner"], x["name"].lower()))
-    schedules.sort(key=lambda x: -(x.get("at") or 0))
-    return {"probes": probes, "schedules": schedules, "dist": dist, "down": sorted(down), "control": me}
-
-
-class ProbeRefAll(BaseModel):
-    vm: str = Field(max_length=40)
-    key: str = Field(max_length=80)
-
-
-class ScheduleAll(BaseModel):
-    cmd: Literal["upgrade", "update"]
-    probes: Optional[list[ProbeRefAll]] = Field(default=None, max_length=5000)   # None = tutte, su tutte le VM
-    at: Optional[float] = None
-    password: str = Field(max_length=256)
-
-
-@app.post("/api/admin/schedules/all")
-async def api_schedule_all(b: ScheduleAll, request: Request, adm: dict = Depends(admin_user)):
-    """Aggiornamento delle sonde di più VM: uno per VM, con le sue sonde."""
-    if not IS_CONTROL:
-        raise HTTPException(status_code=422, detail="Si programma dal pannello del gateway.")
-    await check_admin_pw(adm, b.password, request)
-    me = CONTROL_NAME or ""
-    groups = {}
-    if b.probes is None:
-        groups = {vm: None for vm in [me, *PEERS]}
-    else:
-        for p in b.probes:
-            groups.setdefault(p.vm, []).append(p.key)
-    if not groups:
-        raise HTTPException(status_code=422, detail="Seleziona almeno una sonda.")
-    done, problems = [], []
-    bid = secrets.token_hex(8)                          # una campagna: un solo riepilogo agli amministratori
-    await asyncio.to_thread(sched_batch_register, bid, b.at, adm.get("name") or adm["login"])
-    for vm, keys in groups.items():
-        payload = {"target": "probes", "cmd": b.cmd, "at": b.at, "probes": keys, "batch": bid}
-        if vm == me:
-            if keys is None and not any(k in registry.owned_keys() for k in monitor.state):
-                continue                                   # il gateway di solito non ha sonde
-            try:
-                r = await api_schedule_new(ScheduleNew(**payload, password=b.password), request, adm)
-                done.append({"vm": vm, "result": r["schedule"].get("result")})
-            except HTTPException as e:
-                problems.append(f"{vm}: {e.detail}")
-            continue
-        if vm not in PEERS:
-            problems.append(f"{vm}: VM sconosciuta")
-            continue
-        status, data = await asyncio.to_thread(peer_request, vm, "POST", "/api/admin/schedules",
-                                               {**payload, "password": ""}, as_admin(adm, True), 30)
-        if status == 200:
-            done.append({"vm": vm, "result": (data.get("schedule") or {}).get("result")})
-        elif keys is None and status == 422 and "Nessuna sonda" in str(data.get("detail")):
-            continue                                       # VM senza sonde: niente da aggiornare
-        else:
-            problems.append(f"{vm}: {data.get('detail') or 'non risponde'}")
-    if not done:
-        raise HTTPException(status_code=422, detail=" · ".join(problems) or "Nessuna sonda collegata a cui inviarlo.")
-    await asyncio.to_thread(sched_batch_announce, bid)
-    log.warning("Aggiornamento delle sonde programmato da %s su %s", adm["login"], ", ".join(d["vm"] for d in done))
-    return {"ok": True, "done": done, "problems": problems}
-
-
 def sched_check_at(at_in):
     now = time.time()
     at = now if at_in is None else float(at_in)
@@ -7251,8 +6214,7 @@ async def api_package_upload(request: Request, adm: dict = Depends(admin_user)):
             if os.path.exists(tmp):
                 os.unlink(tmp)
     report = await asyncio.to_thread(store)
-    # rifiutato solo perché questa macchina ha già quella versione (o una più recente): dal gateway
-    # il pacchetto può servire comunque alle VM rimaste indietro
+    # rifiutato solo perché il server ha già quella versione (o una più recente)
     report["up_to_date"] = bool(not report["ok"] and report.get("version") and len(report["errors"]) == 1
                                 and pkgcheck.version_key(report["version"]) <= pkgcheck.version_key(VERSION))
     log.warning("Pacchetto caricato da %s: %s (%s)", adm["login"], report.get("version") or "?",
@@ -7338,89 +6300,6 @@ def admin_events():
 
 
 
-@app.get("/api/admin/vms")
-async def api_admin_vms(adm: dict = Depends(admin_user)):
-    """Stato di tutte le VM: l'orchestratore e le VM probe (lette sulla rete privata)."""
-    if not ORCHESTRATOR:
-        return {"vms": [], "control": CONTROL_NAME, "manage": False}
-
-    async def one(vm):
-        t0 = time.monotonic()
-        status, data = await asyncio.to_thread(peer_request, vm, "GET", "/internal/status", None, None, 5)
-        if status != 200:
-            return {"name": vm, "ok": False, "url": PEERS.get(vm), "public": public_of(vm)}
-        data = data if isinstance(data, dict) else {}
-        # i campi che decide l'orchestratore vengono dopo: una VM non può cambiarli
-        return {**data, "name": vm, "ok": True, "ms": round((time.monotonic() - t0) * 1000), "url": PEERS.get(vm),
-                "public": public_of(vm), "me": False}
-    me = {"name": CONTROL_NAME, "ok": True, "me": True, **await asyncio.to_thread(vm_status)}
-    others = await asyncio.gather(*(one(vm) for vm in list(PEERS)))
-    now = time.time()
-    pending = [{"name": k, "expires": v["expires"], "by": v.get("by", "")}
-               for k, v in REGISTRY["tokens"].items() if v.get("expires", 0) > now]
-    return {"vms": [me, *sorted(others, key=lambda v: v["name"])], "control": CONTROL_NAME, "manage": True,
-            "pending": sorted(pending, key=lambda t: t["name"])}
-
-
-class VmToken(BaseModel):
-    name: str = Field(max_length=16)
-    password: str = Field(max_length=256)
-
-
-class VmRemove(BaseModel):
-    name: str = Field(max_length=16)
-    password: str = Field(max_length=256)
-
-
-def require_orchestrator():
-    if not ORCHESTRATOR:
-        raise HTTPException(status_code=409, detail="Le VM si gestiscono dal pannello del gateway (orchestratore).")
-
-
-@app.post("/api/admin/vms/token")
-async def api_admin_vms_token(b: VmToken, request: Request, adm: dict = Depends(admin_user)):
-    """Token univoco per collegare una VM probe (valido 24 ore, una volta sola). Per una VM che c'è
-    già (reinstallata) il token le dà una chiave nuova al prossimo collegamento."""
-    require_orchestrator()
-    await check_admin_pw(adm, b.password, request)
-    name = b.name.strip().lower()
-    if not VM_NAME.fullmatch(name) or name == CONTROL_NAME:
-        raise HTTPException(status_code=422, detail="Nome della VM: solo lettere minuscole e cifre (per esempio vm3).")
-    token = f"nmvm_{name}.{secrets.token_urlsafe(24)}"
-    expires = time.time() + JOIN_HOURS * 3600
-    who = adm.get("name") or adm["login"]
-
-    def change(reg):
-        reg["tokens"][name] = {"hash": hashlib.sha256(token.encode()).hexdigest(), "expires": expires, "by": who}
-    await asyncio.to_thread(save_registry, change)
-    log.warning("Token per collegare la VM %s creato da %s", name, adm["login"])
-    return {"ok": True, "name": name, "token": token, "expires": expires, "exists": name in PEERS, "version": VERSION}
-
-
-@app.post("/api/admin/vms/remove")
-async def api_admin_vms_remove(b: VmRemove, request: Request, adm: dict = Depends(admin_user)):
-    """Toglie una VM (o il suo token in attesa): solo se non ha utenti né sonde, o se non risponde più."""
-    require_orchestrator()
-    await check_admin_pw(adm, b.password, request)
-    name = b.name.strip().lower()
-    if name not in PEERS and name not in REGISTRY["tokens"]:
-        raise HTTPException(status_code=404, detail=f"La VM {name} non è nell'elenco.")
-    if name in PEERS:
-        status, data = await asyncio.to_thread(peer_request, name, "GET", "/internal/status", None, None, 5)
-        if status == 200 and (data.get("users") or data.get("probes_total")):
-            raise HTTPException(status_code=409, detail=f"La VM {name} ha ancora {data.get('users')} utenti e "
-                                                        f"{data.get('probes_total')} sonde: eliminali prima di toglierla.")
-
-    def change(reg):
-        reg["vms"].pop(name, None)
-        reg["tokens"].pop(name, None)
-    await asyncio.to_thread(save_registry, change)
-    log.warning("VM %s tolta da %s", name, adm["login"])
-    await asyncio.to_thread(admin_notice, f"[INFO] VM {name} tolta",
-                            f"{adm.get('name') or adm['login']} ha tolto la VM {name} dall'elenco.")
-    return {"ok": True}
-
-
 @app.get("/api/admin/vm")
 async def api_admin_vm(request: Request, check: int = 0, adm: dict = Depends(admin_user)):
     """Stato della VM, aggiornamenti disponibili e ultime operazioni."""
@@ -7501,30 +6380,15 @@ async def api_retention_set(b: RetentionBody, request: Request, adm: dict = Depe
     testo = retention_text(valore, b.unit)
     tolte = await asyncio.to_thread(purge_samples)
     log.warning("Conservazione dei dati: %s (scelta da %s, %d righe eliminate)", testo, adm["login"], tolte)
-    if adm.get("forwarded"):
-        return {"ok": True, "value": valore, "unit": b.unit, "text": testo, "deleted": tolte}
-    # più VM: la stessa scelta vale per tutte
-    missed = [vm for vm in list(PEERS) if not await asyncio.to_thread(push_retention, vm, adm)]
     await asyncio.to_thread(admin_notice, "[INFO] Conservazione dei dati cambiata",
                             f"{adm.get('name') or adm['login']} ha impostato la conservazione dei dati a: {testo}."
-                            + (f"\n\nEliminate subito {tolte} righe più vecchie." if tolte else "")
-                            + (f"\n\nNon applicata su: {', '.join(missed)}." if missed else ""))
-    return {"ok": True, "value": valore, "unit": b.unit, "text": testo, "deleted": tolte,
-            "warning": f"Non applicata su {', '.join(missed)}: quelle VM non rispondono, riprova più tardi." if missed else ""}
-
-
-def push_retention(vm, adm) -> bool:
-    """Copia su un'altra VM la conservazione dei dati scelta qui."""
-    valore, unita = retention()
-    status, _ = peer_request(vm, "POST", "/api/admin/retention",
-                             {"unit": unita, "value": valore or 0, "password": ""}, as_admin(adm, True), 60)
-    return status == 200
+                            + (f"\n\nEliminate subito {tolte} righe più vecchie." if tolte else ""))
+    return {"ok": True, "value": valore, "unit": b.unit, "text": testo, "deleted": tolte}
 
 
 # ------------------------------------------------------------------ invio email dal pannello
-# L'account da cui partono le email si sceglie in Server › Invio email, sul gateway, e passa da solo a
-# tutte le VM (anche a quelle collegate dopo): non serve più toccare il .env di ogni macchina. Finché
-# nessuno lo sceglie valgono le righe SMTP_* del .env. Sta nel database degli account (auth.db, leggibile
+# L'account da cui partono le email si sceglie in Server › Invio email: non serve toccare il .env.
+# Finché nessuno lo sceglie valgono le righe SMTP_* del .env. Sta nel database degli account (auth.db, leggibile
 # solo dal servizio), come le altre impostazioni.
 SMTP_KEYS = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME")
 
@@ -7553,8 +6417,6 @@ class SmtpBody(BaseModel):
     sender: str = Field(default="", max_length=200)
     sender_name: str = Field(default="netmon", max_length=80)
     password: str = Field(default="", max_length=256)           # la password dell'amministratore
-    # copia mandata dal gateway a una VM: la configurazione completa, password compresa
-    full: Optional[dict] = None
 
 
 class SmtpTest(BaseModel):
@@ -7576,13 +6438,6 @@ def smtp_save(data):
     smtp_load()
 
 
-def push_smtp(vm, adm) -> bool:
-    """Copia su un'altra VM l'invio email scelto qui (vuoto = la VM torna al suo .env)."""
-    status, _ = peer_request(vm, "POST", "/api/admin/email", {"full": dict(notifier.SMTP_PANEL)},
-                             as_admin(adm, True), 30)
-    return status == 200
-
-
 @app.get("/api/admin/email")
 async def api_admin_email(adm: dict = Depends(admin_user)):
     # admin_email: indirizzo proposto per l'email di prova
@@ -7591,14 +6446,7 @@ async def api_admin_email(adm: dict = Depends(admin_user)):
 
 @app.post("/api/admin/email")
 async def api_admin_email_set(b: SmtpBody, request: Request, adm: dict = Depends(admin_user)):
-    """Salva l'invio email e lo manda a tutte le VM. Una VM riceve dal gateway la copia completa."""
-    if adm.get("forwarded"):
-        if not adm.get("pw_checked") or b.full is None:
-            raise HTTPException(status_code=403, detail="L'invio email si sceglie dal pannello del gateway.")
-        data = {k: str(b.full.get(k) or "") for k in SMTP_KEYS} if b.full.get("SMTP_HOST") else {}
-        await asyncio.to_thread(smtp_save, data)
-        log.warning("Invio email ricevuto dal gateway: %s", data.get("SMTP_HOST") or "righe SMTP_* del .env")
-        return {"ok": True}
+    """Salva l'invio email scelto nel pannello (vuoto = righe SMTP_* del .env)."""
     await check_admin_pw(adm, b.password, request)
     host = b.host.strip()
     if host:
@@ -7613,15 +6461,11 @@ async def api_admin_email_set(b: SmtpBody, request: Request, adm: dict = Depends
     else:
         data = {}
     await asyncio.to_thread(smtp_save, data)
-    testo = f"{host}:{b.port} come {b.user.strip()}" if host else "righe SMTP_* del .env di ogni macchina"
+    testo = f"{host}:{b.port} come {b.user.strip()}" if host else "righe SMTP_* del .env"
     log.warning("Invio email cambiato da %s: %s", adm["login"], testo)
-    results = await asyncio.gather(*(asyncio.to_thread(push_smtp, vm, adm) for vm in list(PEERS)))
-    missed = [vm for vm, ok in zip(list(PEERS), results) if not ok]
     await asyncio.to_thread(admin_notice, "[INFO] Invio email cambiato",
-                            f"{adm.get('name') or adm['login']} ha cambiato l'account da cui partono le email: {testo}."
-                            + (f"\n\nNon applicato su: {', '.join(missed)}." if missed else ""))
-    return {"ok": True, **await asyncio.to_thread(smtp_state), "vms": len(PEERS) - len(missed),
-            "warning": f"Non applicato su {', '.join(missed)}: quelle VM non rispondono, riprova più tardi." if missed else ""}
+                            f"{adm.get('name') or adm['login']} ha cambiato l'account da cui partono le email: {testo}.")
+    return {"ok": True, **await asyncio.to_thread(smtp_state)}
 
 
 def smtp_test_local(to):
@@ -7630,7 +6474,7 @@ def smtp_test_local(to):
         return False, "invio email non configurato"
     try:
         send_email("netmon: email di prova", "Email di prova da netmon: l'invio funziona.\n\n"
-                   f"Partita da: {VM_ID or CONTROL_NAME or 'server'}.", False, to)
+                   "Partita da: server.", False, to)
         return True, ""
     except Exception as exc:  # noqa: BLE001
         log.warning("Email di prova a %s non riuscita: %s", to, exc)
@@ -7646,24 +6490,13 @@ def smtp_test_local(to):
 
 @app.post("/api/admin/email/test")
 async def api_admin_email_test(b: SmtpTest, adm: dict = Depends(admin_user)):
-    """Email di prova da questa macchina e, sul gateway, da tutte le VM: una riga di esito per ognuna."""
+    """Email di prova dal server: una riga di esito."""
     to = b.to.strip()
     if "@" not in to or any(c in to for c in " \r\n,;<>"):
         raise HTTPException(status_code=422, detail="Indirizzo email non valido.")
     ok, err = await asyncio.to_thread(smtp_test_local, to)
-    rows = [{"vm": VM_ID or CONTROL_NAME or "server", "ok": ok, "error": err}]
-    if adm.get("forwarded"):
-        return {"results": rows}
-
-    def remote(vm):
-        status, data = peer_request(vm, "POST", "/api/admin/email/test", {"to": to}, as_admin(adm), 40)
-        if status != 200:
-            return {"vm": vm, "ok": False, "error": data.get("detail") or "la VM non risponde"}
-        r = (data.get("results") or [{}])[0]
-        return {"vm": vm, "ok": bool(r.get("ok")), "error": r.get("error") or ""}
-    rows += await asyncio.gather(*(asyncio.to_thread(remote, vm) for vm in list(PEERS)))
-    log.info("Email di prova a %s da %s: %d su %d riuscite", to, adm["login"], sum(r["ok"] for r in rows), len(rows))
-    return {"results": rows}
+    log.info("Email di prova a %s da %s: %s", to, adm["login"], "riuscita" if ok else err)
+    return {"results": [{"vm": "server", "ok": ok, "error": err}]}
 
 
 @app.get("/api/admin/vm/memory")
@@ -7730,11 +6563,6 @@ ADMIN_LANG_COOKIE = "netmon_admin_lang"
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
-    # Una VM probe non ha il pannello: l'amministrazione sta solo sul gateway, quindi
-    # vmN.dominio/admin porta a dominio/admin (la parte dopo # resta al browser).
-    gw = os.getenv("GATEWAY_URL", "").strip().rstrip("/")
-    if VM_ID and gw.startswith(("https://", "http://")):
-        return RedirectResponse(gw + "/admin", status_code=302, headers={"Cache-Control": "no-store"})
     lang = i18n.pick(None, request.cookies.get(ADMIN_LANG_COOKIE), request.headers.get("accept-language"))
     page, etag = ADMIN_PAGES[lang]
     headers = {"Cache-Control": "no-cache", "ETag": etag, "Referrer-Policy": "no-referrer",
@@ -7784,8 +6612,8 @@ PRIVACY_DAYS = {"it": ("senza limite di tempo", "1 giorno", "{0} giorni"),
 
 
 # ------------------------------------------------------------------ robots.txt e sitemap.xml (pubblici)
-# Solo le pagine pubbliche di questo indirizzo: sul gateway la pagina d'accesso, su una VM la pagina
-# di stato (che senza accesso mostra il login); su tutti l'informativa. Pannello e API esclusi.
+# Solo le pagine pubbliche: la pagina di stato (che senza accesso mostra il login) e l'informativa.
+# Pannello e API esclusi.
 HOST_OK = re.compile(r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
 
 
@@ -7800,7 +6628,7 @@ def site_base(request: Request) -> str:
 async def robots_txt(request: Request):
     base = site_base(request)
     body = ("User-agent: *\nAllow: /$\nAllow: /status\nAllow: /privacy\n"
-            "Disallow: /admin\nDisallow: /api/\nDisallow: /gateway/\n"
+            "Disallow: /admin\nDisallow: /api/\n"
             + (f"Sitemap: {base}/sitemap.xml\n" if base else ""))
     return Response(body, media_type="text/plain", headers={"Cache-Control": "public, max-age=3600"})
 
@@ -7810,16 +6638,7 @@ async def sitemap_xml(request: Request):
     base = site_base(request)
     if not base:
         raise HTTPException(404)
-    if ORCHESTRATOR:
-        # gateway: anche la pagina di ogni VM con indirizzo pubblico (stesso dominio: con la proprietà
-        # «Dominio» di Search Console una sitemap può elencare tutti i sottodomini)
-        locs = [base + "/", base + "/privacy"]
-        for vm in sorted(REGISTRY["vms"]):
-            pub = public_of(vm).rstrip("/")
-            if re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]{1,5})?", pub):
-                locs.append(pub + "/status")
-    else:
-        locs = [base + "/status", base + "/privacy"]
+    locs = [base + "/status", base + "/privacy"]
     urls = "".join(f"  <url><loc>{u}</loc></url>\n" for u in locs)
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + "</urlset>\n")
@@ -7975,7 +6794,7 @@ async def api_status(user: dict = Depends(ui_user), events: int = EVENTS_SHOWN, 
     expires = local_time(expiry["expires"], "%d/%m/%Y") if expiry and expiry["expires"] else None
     events = [{"id": rid, "time": local_time(ts), "title": t,
                "kind": "ok" if rec else ("bad" if crit else "warn")} for rid, ts, t, crit, rec in rows]
-    return {"probes": probes, "server": {"name": VM_ID or "server", "version": VERSION},
+    return {"probes": probes, "server": {"name": "server", "version": VERSION},
             "events": events, "events_total": total, "events_from": da,
             "events_all": all_total, "event_tags": tags,
             "server_version": VERSION,
@@ -8899,7 +7718,7 @@ async def api_probe_package(authorization: str = Header(default="")):
 
 
 # Programma della sonda da installare: solo la cartella probe del pacchetto completo delle sonde,
-# quindi sempre della versione installata su questa VM (aggiornata insieme al gateway). Si scarica
+# quindi sempre della versione installata sul server. Si scarica
 # solo con la sessione di un utente registrato.
 _kit_cache = [None, None, None]                        # (mtime, size), versione, zip
 
@@ -9132,7 +7951,7 @@ async def root():
 
 # Mappa dei collegamenti (componente JavaScript comune a pagina di stato e pannello)
 TOPO_JS = r"""// ---- mappa dei collegamenti: un nodo centrale (hub) e i nodi intorno, con lo stato del collegamento ----
-// Componente comune a pagina di stato (server e sonde) e pannello (gateway e VM):
+// Componente comune a pagina di stato (server e sonde) e pannello:
 // drawTopo(svg, hub, nodi, alClic). Ogni nodo: { id, name, ip, sub, sub2, state: "ok" | "slow" | "warn" |
 // "bad", ms, pill, title }; pill è il testo a metà collegamento (altrimenti i ms). I testi vanno solo in
 // textContent (mai HTML). Si muovono solo i pallini sui collegamenti, piano.
@@ -9464,7 +8283,7 @@ main > header{position:sticky;top:0;z-index:30;isolation:isolate;margin-top:-18p
 main > header::before{content:"";position:absolute;inset:0;background:var(--bar);z-index:-1;
   box-shadow:0 0 0 100vmax var(--bar);clip-path:inset(0 -100vmax)}
 main > header .pagename{color:var(--bar-ink)}
-main > header .pagename .crumb,main > header .who,main > header .vm-cur{color:var(--bar-muted)}
+main > header .pagename .crumb,main > header .who{color:var(--bar-muted)}
 main > header :is(.headstart > button,.tools > button,.tools > details > summary,.tools select.pill){
   background:transparent;color:var(--bar-ink);border-color:var(--bar-line)}
 main > header :is(.headstart > button,.tools > button,.tools > details > summary,.tools select.pill):hover{
@@ -9522,7 +8341,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261026-104239") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261027-161500") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -9784,7 +8603,6 @@ dialog.wide{width:min(1180px,96vw)}
 .dash-menu label.dev{margin-left:20px}
 .dash-menu input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);flex:none;margin:0}
 .who{color:var(--muted);font-size:.9rem}
-.vm-cur{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:.9rem}
 .login-card .brand{position:relative}
 /* schermata di accesso: logo più grande e nome per esteso su due righe (NetMon, sotto Home tool) */
 .login-card .brand{gap:14px;font-size:1.4rem;line-height:1.15}
@@ -15141,8 +13959,6 @@ $("#login-form").onsubmit = async e => {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const res = await r.json().catch(() => ({}));
     if (r.status === 409) { showLogin("login", res.detail || "Account già esistente: accedi."); return; }
-    // account spostato su un'altra VM: si riparte da lì, con l'email già scritta
-    if (r.status === 410 && /^https?:\/\//.test(res.moved || "")) { msg.textContent = res.detail; location.href = res.moved + "/#accesso=" + encodeURIComponent(email); return; }
     if (!r.ok) return bad(typeof res.detail === "string" ? res.detail : "Accesso non riuscito (HTTP " + r.status + ").");
     msg.textContent = "";
     if (res.lang && res.lang !== I18N.lang) { location.reload(); return; }
@@ -15280,7 +14096,7 @@ function showToken(title, token, url) {
   $("#pr-token").textContent = token;
   $("#pr-token").setAttribute("translate", "no");
   $("#pr-token-copy").textContent = "Copia";
-  // l'indirizzo a cui la sonda manda i dati: quello di questa VM (anche dietro il gateway)
+  // l'indirizzo a cui la sonda manda i dati: quello di questo server
   $("#pr-url").textContent = url || location.origin + "/api/report";
   $("#pr-url").setAttribute("translate", "no");
   $("#pr-url-copy").textContent = "Copia";
@@ -15710,7 +14526,7 @@ if (location.hash.startsWith("#invito=")) {
   pendingInvite = { code: q.get("invito") || "", email: q.get("email") || "" };
   history.replaceState(null, "", location.pathname);           // il codice non resta nella barra degli indirizzi
 }
-// arrivo dalla pagina d'accesso del gateway: /#accesso=EMAIL (si sceglie solo la password)
+// link con l'email già scritta: /#accesso=EMAIL (si sceglie solo la password)
 let pendingLogin = null;
 if (location.hash.startsWith("#accesso=")) {
   pendingLogin = new URLSearchParams(location.hash.slice(1)).get("accesso") || "";
@@ -15804,9 +14620,6 @@ ADMIN_TEMPLATE = r'''<!doctype html>
 .acts-pop button:hover,.acts-pop button:focus-visible{background:var(--hover);outline:none}
 .acts-pop button.danger{color:var(--bad)}
 .acts-pop .acts-group{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:6px 12px 2px}
-.mv-check{font-size:.9rem;margin:0 0 12px}
-.mv-check li{margin:2px 0}
-.mv-check li.bad{color:var(--bad)} .mv-check li.warn{color:var(--warn)}
 .ua-box{margin-top:14px}
 .ua-box p{margin:0 0 10px}
 #rb-box{border-color:transparent}   /* il riquadro rollback resta sempre visibile: niente bordo giallo */
@@ -15918,31 +14731,6 @@ tr.is-blocked td{color:var(--muted)}
 .pk-plist .nm{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pk-plist .sub{display:block;color:var(--muted);font-size:.8rem}
 .pk-plist label > span{min-width:0}
-.topo-fold{margin:0 18px}
-.topo-fold > summary{cursor:pointer;color:var(--muted);font-size:.88rem;padding:4px 0}
-.topo-fold .topo-wrap{padding:6px 0 2px}
-/* Barra delle macchine: su quale macchina agiscono le sezioni «per VM» (gateway in blu, VM in verde acqua) */
-:root{--vmc:#0E7C74;--vmc-ink:#FFFFFF}
-@media (prefers-color-scheme: dark){:root{--vmc:#4FC3B5;--vmc-ink:#0B1622}}
-.vm-bar{margin:14px auto 0;max-width:var(--maxw,1200px);padding:0 16px}
-.vm-bar[hidden]{display:none}
-.vm-bar-tabs{display:flex;flex-wrap:wrap;gap:8px}
-.vm-bar-tabs button{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;
-  border:1.5px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
-.vm-bar-tabs button small{font-weight:400;color:var(--muted);font-size:.78rem}
-.vm-bar-tabs button i{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
-.vm-bar-tabs button i.bad{background:var(--bad)}
-.vm-bar-tabs button.gw[aria-current="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.vm-bar-tabs button.vm[aria-current="true"]{background:var(--vmc);border-color:var(--vmc);color:var(--vmc-ink)}
-.vm-bar-tabs button[aria-current="true"] small{color:inherit;opacity:.85}
-.vm-bar-tabs button[aria-current="true"] i{box-shadow:0 0 0 2px currentColor}
-.vm-bar-note{margin:8px 2px 0;font-size:.88rem;color:var(--muted)}
-.vm-bar-note strong{color:var(--ink)}
-.vm-badge{display:inline-block;margin-left:8px;padding:1px 10px;border-radius:999px;font-weight:600;font-size:.8em;
-  vertical-align:middle;background:var(--accent-ink);color:var(--accent)}
-.vm-badge.vm{background:var(--vmc);color:var(--vmc-ink)}
-.mach-gw #page-vm > section,.mach-gw #page-probes > section{box-shadow:inset 0 3px 0 var(--accent)}
-.mach-vm #page-vm > section,.mach-vm #page-probes > section{box-shadow:inset 0 3px 0 var(--vmc)}
 </style>
 </head>
 <body>
@@ -16053,15 +14841,9 @@ tr.is-blocked td{color:var(--muted)}
     <h2 class="pagename" id="pagename">Amministrazione</h2>
     </div>
     <div class="tools">
-      <label class="vm-cur" id="cur-vm-box" hidden title="VM di cui vedi sonde e server">VM
-        <select id="cur-vm" class="pill" aria-label="VM da gestire"></select></label>
       <button type="button" id="reload">Aggiorna</button>
     </div>
   </header>
-  <nav class="vm-bar" id="vm-bar" hidden aria-label="Macchina su cui stai lavorando">
-    <div class="vm-bar-tabs" id="vm-bar-tabs"></div>
-    <p class="vm-bar-note" id="vm-bar-note"></p>
-  </nav>
 
   <div id="page-adm">
   <section>
@@ -16075,28 +14857,26 @@ tr.is-blocked td{color:var(--muted)}
       </div>
       <div class="tokenbox ua-box" id="im-box" hidden>
         <p><strong>Importa un utente</strong> da un altro server netmon: il file del pulsante <em>Esporta</em> nella
-          pagina Utenti del vecchio server (versione 2.1 aggiornata) o di un'altra VM. Arrivano account, sonde e
-          storico: l'utente entra con la sua password e le sonde continuano con il loro token, in pausa per
-          un'ora (niente avvisi mentre le sposti). Se l'account c'è già sulla VM si importa solo lo storico
-          (unito o sovrascritto), sulle sonde che scegli.</p>
+          pagina Utenti dell'altro server. Arrivano account, sonde e storico: l'utente entra con la sua password
+          e le sonde continuano con il loro token, in pausa per un'ora (niente avvisi mentre le sposti). Se
+          l'account c'è già qui si importa solo lo storico (unito o sovrascritto), sulle sonde che scegli.</p>
         <div class="cols">
           <div><label class="field" for="im-file">File esportato (.netmon)</label>
             <input id="im-file" type="file" accept=".netmon,.zip"></div>
-          <div><label class="field" for="im-vm">VM</label><select id="im-vm"></select></div>
           <div><label class="field" for="im-fpw">Password del file</label>
             <input id="im-fpw" type="password" autocomplete="off"></div>
           <div class="ua-btns"><button type="button" class="primary" id="im-up">Carica e controlla</button><button type="button" id="im-no">Annulla</button></div>
         </div>
         <p class="hint" id="im-msg" role="status"></p>
         <div id="im-merge" hidden>
-          <p>L'account esiste già su questa VM: si importa <strong>solo lo storico</strong> (misure, eventi, traffico,
-            speedtest). Account, sonde, token e impostazioni restano quelli della VM.</p>
+          <p>L'account esiste già su questo server: si importa <strong>solo lo storico</strong> (misure, eventi, traffico,
+            speedtest). Account, sonde, token e impostazioni restano quelli del server.</p>
           <div class="im-modes">
             <label><input type="radio" name="im-hist" value="merge" checked> <span><strong>Unisci</strong>: aggiunge allo
-              storico della VM ciò che manca, senza toccare quello che c'è già</span></label>
+              storico del server ciò che manca, senza toccare quello che c'è già</span></label>
             <label><input type="radio" name="im-hist" value="overwrite"> <span><strong>Sovrascrivi</strong>: nel periodo
-              coperto dal backup vale il backup (i dati della VM di quel periodo vengono sostituiti); prima e dopo
-              resta lo storico della VM</span></label>
+              coperto dal backup vale il backup (i dati del server di quel periodo vengono sostituiti); prima e dopo
+              resta lo storico del server</span></label>
           </div>
           <p class="hint">Storico di quale sonda, su quale sonda dell'account:</p>
           <div class="im-map" id="im-map"></div>
@@ -16118,15 +14898,13 @@ tr.is-blocked td{color:var(--muted)}
           <div><label class="field" for="au-days">Validità</label>
             <select id="au-days"><option value="1">1 giorno</option><option value="7" selected>7 giorni</option>
               <option value="30">30 giorni</option><option value="0">senza scadenza</option></select></div>
-          <div class="vm-pick" hidden><label class="field" for="au-vm">VM</label>
-            <select id="au-vm"></select></div>
           <div class="ua-btns"><button type="button" class="primary" id="au-go">Invia invito</button><button type="button" id="au-no">Annulla</button></div>
         </div>
         <p class="hint" id="au-msg" role="status"></p>
         <div class="tokenrow" id="au-codebox" hidden><code id="au-code"></code><button type="button" id="au-copy">Copia</button></div>
       </div>
       <div class="tbl-wrap"><table class="adm-table">
-        <thead id="users-head"><tr><th data-sort="email">Utente</th><th data-sort="vm">VM</th><th data-sort="state">Stato</th>
+        <thead id="users-head"><tr><th data-sort="email">Utente</th><th data-sort="state">Stato</th>
           <th data-sort="plan">Piano</th><th data-sort="expiry">Scadenza</th><th data-sort="created">Registrato</th>
           <th data-sort="seen">Ultima attività</th><th class="num" data-sort="sessions">Sessioni</th><th class="num" data-sort="probes">Sonde</th>
           <th class="num" data-sort="fritz">FRITZ!Box</th><th class="num" data-sort="devices">Dispositivi</th><th></th></tr></thead>
@@ -16157,19 +14935,6 @@ tr.is-blocked td{color:var(--muted)}
         </div>
         <p class="hint" id="ua-msg" role="status"></p>
       </div>
-      <div class="tokenbox ua-box" id="mv-box" hidden>
-        <p id="mv-title"></p>
-        <div class="cols">
-          <div><label class="field" for="mv-to">Sposta sulla VM</label><select id="mv-to"></select></div>
-        </div>
-        <ul class="mv-check" id="mv-check"></ul>
-        <div class="cols">
-          <div><label class="field" for="mv-pass">La tua password di amministratore</label>
-            <input id="mv-pass" type="password" autocomplete="current-password"></div>
-          <div class="ua-btns"><button type="button" class="primary" id="mv-go" disabled>Sposta</button><button type="button" id="mv-no">Annulla</button></div>
-        </div>
-        <p class="hint" id="mv-msg" role="status"></p>
-      </div>
     </div>
   </section>
 
@@ -16179,7 +14944,7 @@ tr.is-blocked td{color:var(--muted)}
       <p class="hint">Account eliminati senza cancellarne i dati: le sonde restano con il loro storico, ricollegabili
         con il loro token, e vengono cancellate da sole alla data indicata.</p>
       <div class="tbl-wrap"><table class="adm-table">
-        <thead><tr><th>Utente</th><th>VM</th><th>Eliminato</th><th>Da chi</th><th class="num">Sonde</th>
+        <thead><tr><th>Utente</th><th>Eliminato</th><th>Da chi</th><th class="num">Sonde</th>
           <th>Dati cancellati il</th><th></th></tr></thead>
         <tbody id="inactive"></tbody>
       </table></div>
@@ -16204,8 +14969,6 @@ tr.is-blocked td{color:var(--muted)}
             <input id="inv-email" type="email" maxlength="254" placeholder="gli invio il codice"></div>
           <div><label class="field" for="inv-note">Nota</label>
             <input id="inv-note" maxlength="80" placeholder="es. Marco, casa al mare"></div>
-          <div class="vm-pick" hidden><label class="field" for="inv-vm">VM</label>
-            <select id="inv-vm"></select></div>
           <div><label class="field" for="inv-uses">Utilizzi</label>
             <select id="inv-uses"><option value="1" selected>1 registrazione</option><option value="5">5 registrazioni</option>
               <option value="10">10 registrazioni</option><option value="0">senza limite</option></select></div>
@@ -16381,12 +15144,11 @@ tr.is-blocked td{color:var(--muted)}
       </div>
       <div class="tbl-wrap"><table class="adm-table">
         <thead><tr><th class="sel"><input type="checkbox" id="pr-all" aria-label="Seleziona tutte le sonde mostrate"></th>
-          <th>Sonda</th><th>Account</th><th class="pr-vm-col" hidden>VM</th><th>Stato</th><th>Versione netmon</th><th>Ultimo report</th><th>Operazione</th></tr></thead>
+          <th>Sonda</th><th>Account</th><th>Stato</th><th>Versione netmon</th><th>Ultimo report</th><th>Operazione</th></tr></thead>
         <tbody id="pr-rows"></tbody>
       </table></div>
       <fieldset class="sched-box">
         <legend>Programma un aggiornamento</legend>
-        <p class="maint-status bad" id="ps-behind" hidden></p>
         <div class="cols">
           <div><label class="field" for="ps-cmd">Aggiornamento</label>
             <select id="ps-cmd"><option value="update">netmon</option>
@@ -16441,40 +15203,6 @@ tr.is-blocked td{color:var(--muted)}
   </div>
 
   <div id="page-vm" hidden>
-  <section id="vms-card" hidden>
-    <div class="probe-head"><h2>Tutte le VM</h2><span class="txt" id="vms-sub"></span></div>
-    <details class="arrow topo-fold" id="vms-topo-fold" open><summary>Mappa dei collegamenti</summary>
-    <div class="topo-wrap">
-      <svg id="vms-topo" class="topo" aria-label="Mappa dei collegamenti tra il gateway e le VM"></svg>
-      <div class="topo-legend"><span><i></i>collegata</span><span><i class="slow"></i>lenta o da riavviare</span>
-        <span><i class="bad"></i>non risponde</span><span>Tocca una VM per aprirla.</span></div>
-    </div>
-    </details>
-    <div class="tbl-wrap"><table class="adm-table">
-      <thead><tr><th>VM</th><th>Stato</th><th>Versione</th><th class="num">Utenti</th><th class="num">Sonde</th>
-        <th class="num">CPU</th><th class="num">Memoria</th><th class="num">Disco</th><th class="num">Dati</th><th>Acceso da</th><th></th></tr></thead>
-      <tbody id="vms-rows"></tbody>
-    </table></div>
-    <div class="admin-body" id="vms-manage" hidden>
-      <fieldset>
-        <legend>Collega una VM</legend>
-        <p class="hint">Genera il token della VM (vale 24 ore, una volta sola) e inseriscilo quando installi netmon
-          sulla VM. Su una VM già installata lo stesso comando la ricollega, con il suo nome: utenti e dati restano.</p>
-        <div class="cols">
-          <div><label class="field" for="vma-name">Nome della VM</label><input id="vma-name" placeholder="vm3" maxlength="16"></div>
-          <div><label class="field" for="vma-pass">La tua password</label><input id="vma-pass" type="password" autocomplete="current-password"></div>
-          <div><label class="field">&nbsp;</label><button type="button" class="primary" id="vma-go">Genera il token</button></div>
-        </div>
-        <p class="hint" id="vma-msg" role="status"></p>
-        <div class="tokenbox" id="vma-box" hidden>
-          <p class="hint">Sulla VM (stessa rete privata del gateway), come root:</p>
-          <pre id="vma-cmd" style="white-space:pre-wrap;word-break:break-all"></pre>
-          <button type="button" id="vma-copy">Copia</button>
-        </div>
-        <p class="hint" id="vma-pending"></p>
-      </fieldset>
-    </div>
-  </section>
   <section id="vm-card">
     <div class="probe-head"><h2 id="vm-title">Stato VM</h2><i class="led" id="vm-led"></i><span class="txt" id="vm-sub"></span></div>
     <div id="vm-body"><div class="pi-empty">Caricamento…</div></div>
@@ -16545,10 +15273,6 @@ tr.is-blocked td{color:var(--muted)}
           </div>
           <p class="hint" id="pk-probes-note" hidden></p>
           <div class="pk-plist" id="pk-plist" hidden></div>
-          <p class="hint" id="pk-vms-note" hidden>Dal gateway il pacchetto si installa anche sulle VM con una
-            versione più vecchia (elenco qui sopra), prima su di loro e per ultimo sul gateway. Le VM che hanno già
-            questa versione non vengono toccate. «Dopo, aggiorna le sonde» vale per ogni VM aggiornata.
-            Togli la spunta alle VM (o al gateway) che non vuoi aggiornare adesso.</p>
           <div class="cols">
             <div><label class="field" for="pk-pass">La tua password di amministratore</label>
               <input id="pk-pass" type="password" autocomplete="current-password"></div>
@@ -16579,7 +15303,7 @@ tr.is-blocked td{color:var(--muted)}
     <div class="probe-head"><h2>Invio email</h2><span class="txt" id="em-now"></span></div>
     <div class="admin-body">
       <fieldset>
-        <p class="hint">L'account da cui partono tutte le email: avvisi e scadenze agli utenti, codici e avvisi agli amministratori. Si sceglie qui e passa da solo a <strong>tutte le VM</strong>, anche a quelle collegate dopo. Finché non lo scegli valgono le righe <code>SMTP_…</code> del <code>.env</code> di ogni macchina. Con Gmail serve una <strong>password per le app</strong> (myaccount.google.com/apppasswords), non quella dell'account.</p>
+        <p class="hint">L'account da cui partono tutte le email: avvisi e scadenze agli utenti, codici e avvisi agli amministratori. Finché non lo scegli valgono le righe <code>SMTP_…</code> del <code>.env</code>. Con Gmail serve una <strong>password per le app</strong> (myaccount.google.com/apppasswords), non quella dell'account.</p>
         <div class="cols">
           <div><label class="field" for="em-host">Server SMTP</label>
             <input id="em-host" placeholder="smtp.gmail.com" autocomplete="off" spellcheck="false"></div>
@@ -16601,14 +15325,14 @@ tr.is-blocked td{color:var(--muted)}
         <div class="cols">
           <div><label class="field" for="em-pass">La tua password di amministratore</label>
             <input id="em-pass" type="password" autocomplete="current-password"></div>
-          <div class="ua-btns"><button type="button" class="primary" id="em-save">Salva e manda a tutte le VM</button>
+          <div class="ua-btns"><button type="button" class="primary" id="em-save">Salva</button>
             <button type="button" id="em-env" hidden>Usa il .env</button></div>
         </div>
         <p class="hint" id="em-msg" role="status"></p>
       </fieldset>
       <fieldset>
         <legend>Email di prova</legend>
-        <p class="hint">Parte dal gateway e da ogni VM: per ognuna dice se l'invio funziona o il motivo dell'errore (per esempio <em>535 Username and Password not accepted</em> = password sbagliata).</p>
+        <p class="hint">Dice se l'invio funziona o il motivo dell'errore (per esempio <em>535 Username and Password not accepted</em> = password sbagliata).</p>
         <div class="cols">
           <div><label class="field" for="em-to">Manda a</label>
             <input id="em-to" type="email" autocomplete="email"></div>
@@ -16760,11 +15484,9 @@ document.addEventListener("paste", e => {
 });
 function say(sel, text, bad) { const o = $(sel); o.className = o.className.replace(/ ?(warn|bad)$/, "") + (bad ? (o.classList.contains("login-msg") ? " bad" : " warn") : ""); o.textContent = text || ""; }
 
-// Più VM: la VM a cui va la richiesta (vuoto = la VM di controllo, cioè questa)
-async function api(url, body, vm) {
+async function api(url, body) {
   const opt = body === undefined ? { cache: "no-store", headers: {} }
     : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
-  if (vm && vm !== CONTROL) opt.headers["X-Netmon-VM"] = vm;
   const r = await fetch(url, opt);
   const res = await r.json().catch(() => ({}));
   // sessione scaduta o password provvisoria: solo per queste risposte del server, non per una password
@@ -16776,84 +15498,10 @@ async function api(url, body, vm) {
   return res;
 }
 
-// Sonde e Server si guardano una VM alla volta: quella scelta in alto (CUR_VM)
-let CONTROL = "", CUR_VM = "", VM_LIST = [], VM_VERS = {}, VM_INFO = {}, VMS_READY = Promise.resolve();
-// La macchina scelta vale solo per questa scheda del browser: aprendo il pannello si parte sempre dal
-// gateway, così non si finisce per sbaglio su una VM scelta giorni prima.
-try { CUR_VM = sessionStorage.getItem("netmon.admvm") || ""; localStorage.removeItem("netmon.admvm"); } catch {}
-const vmApi = (url, body) => api(url, body, CUR_VM);
-function fillVmPicker(vms, control) {
-  if (control) CONTROL = control;
-  VM_LIST = vms.map(v => v.name);
-  VM_VERS = Object.fromEntries(vms.map(v => [v.name, { version: v.version || "", ok: v.ok !== false }]));
-  VM_INFO = Object.fromEntries(vms.map(v => [v.name, v]));
-  if (!VM_LIST.includes(CUR_VM)) CUR_VM = CONTROL || (vms[0] || {}).name || "";
-  const sel = $("#cur-vm"), multi = VM_LIST.length > 1;
-  sel.innerHTML = "";
-  vms.forEach(v => {
-    const o = document.createElement("option");
-    o.value = v.name; o.textContent = v.name + (v.ok === false ? " · non risponde" : "");
-    sel.appendChild(o);
-  });
-  sel.value = CUR_VM;
-  document.querySelectorAll(".vm-multi").forEach(e => { e.hidden = !multi; });
-  showVmPicker();
-}
 let currentSub = null;
-// Amministrazione e «Tutte le VM» valgono per tutte le VM: lì la scelta della VM non serve
-const vmScoped = () => currentPage !== "adm" && !(currentPage === "vm" && ["tutte-le-vm", "invio-email"].includes(currentSub))
-  && !(currentPage === "probes" && currentSub === "elenco-sonde");
-// Con più VM l'elenco delle sonde e il loro aggiornamento valgono per tutte le VM insieme
-const allVms = () => VM_LIST.length > 1;
-const prId = p => allVms() ? p.vm + "|" + p.key : p.key;
-// Con più macchine, nelle sezioni che valgono per una sola: la barra con gateway e VM (al posto del
-// menu a tendina) e una frase che dice su quale macchina agiscono i pulsanti della pagina.
-function showVmPicker() {
-  const show = VM_LIST.length > 1 && vmScoped(), gwNow = CUR_VM === CONTROL;
-  $("#cur-vm-box").hidden = true;
-  $("#vm-bar").hidden = !show;
-  document.body.classList.toggle("mach-gw", show && gwNow);
-  document.body.classList.toggle("mach-vm", show && !gwNow);
-  // nome della macchina nel titolo, con il suo colore (il titolo può essere scritto prima dell'elenco)
-  const pn = $("#pagename"), old = pn.querySelector(".vm-badge");
-  if (old) old.remove();
-  if (show) pn.append(el("span", "vm-badge" + (gwNow ? "" : " vm"), CUR_VM));
-  if (!show) return;
-  const tabs = $("#vm-bar-tabs"); tabs.innerHTML = "";
-  VM_LIST.forEach(name => {
-    const gw = name === CONTROL, info = VM_INFO[name] || {};
-    const b = el("button", gw ? "gw" : "vm"); b.type = "button";
-    b.setAttribute("aria-current", String(name === CUR_VM));
-    b.append(el("i", info.ok === false ? "bad" : ""), el("span", "", name), el("small", "", gw ? "gateway" : "VM"));
-    b.title = info.ok === false ? `${name}: non risponde` : name;
-    b.onclick = () => { if (name !== CUR_VM) pickVm(name); };
-    tabs.appendChild(b);
-  });
-  const info = VM_INFO[CUR_VM] || {}, note = $("#vm-bar-note"); note.textContent = "";
-  const host = u => (u || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  if (CUR_VM === CONTROL) {
-    note.append("Stai lavorando sul ", el("strong", "", "gateway"),
-      " (orchestratore: pannello e pagina d'accesso, nessun utente né sonda). I pulsanti di questa pagina valgono solo per il gateway.");
-  } else {
-    const where = [host(info.url).replace(/:\d+$/, ""), host(info.public)].filter(Boolean).join(" · ");
-    note.append("Stai lavorando su ", el("strong", "", CUR_VM), ", una VM con utenti e sonde"
-      + (where ? ` (${where})` : "") + `. I pulsanti di questa pagina valgono solo per ${CUR_VM}.`);
-  }
-}
-function pickVm(name) {
-  CUR_VM = name; $("#cur-vm").value = name;
-  try { sessionStorage.setItem("netmon.admvm", name); } catch {}
-  // resta nella sezione aperta: tornare a «Tutte le VM» nasconderebbe proprio la scelta della VM
-  loadedPage = null; currentPage === "adm" ? showPage("vm") : showPage(currentPage, true, currentSub);
-}
-$("#cur-vm").onchange = () => pickVm($("#cur-vm").value);
-async function loadVmList() {
-  try { const res = await api("/api/admin/vms"); fillVmPicker(res.vms || [], res.control); return res; }
-  catch { return null; }
-}
-// Versione della VM aperta (dell'orchestratore o di una VM probe, attraverso di lui)
+// Versione del server (per capire quando è ripartito)
 async function vmHealth() {
-  return { version: (await vmApi("/api/admin/vm")).server_version };
+  return { version: (await api("/api/admin/vm")).server_version };
 }
 
 async function copyText(src, btn) {
@@ -16880,7 +15528,7 @@ function showCard(id) {
   ["#al-form", "#pwc-form", "#mfa-form", "#setup-form"].forEach(s => { $(s).hidden = s !== id; });
 }
 
-// arrivo dalla pagina d'accesso del gateway con l'email di un amministratore: /admin#accesso=EMAIL
+// link con l'email di un amministratore già scritta: /admin#accesso=EMAIL
 if (location.hash.startsWith("#accesso=")) {
   $("#al-login").value = new URLSearchParams(location.hash.slice(1)).get("accesso") || "";
   history.replaceState(null, "", location.pathname);
@@ -16904,7 +15552,6 @@ function showPwChange(login, current = "") {
 function enter(login, name) {
   $("#login").hidden = true; $("#app").hidden = false;
   $("#who").textContent = name ? `${name} · ${login}` : login;
-  VMS_READY = loadVmList();       // più VM: l'elenco per la scelta in alto
   tgLoad();                       // la tua chat Telegram: si legge una volta, all'ingresso
   rtLoad();                       // e la conservazione dei dati
   const [h, sub] = location.hash.split("/");
@@ -17061,38 +15708,7 @@ async function load() {
   }
 }
 
-// Più VM dietro il gateway: nei moduli dei codici di accesso si sceglie dove nascerà l'utente
-// (proposta la VM con meno sonde), e ogni codice mostra la sua VM.
-function renderVms(vms) {
-  const isel = $("#im-vm"), iprima = isel.value;
-  isel.innerHTML = "";
-  vms.forEach(v => {
-    const o = document.createElement("option");
-    o.value = v.name; o.disabled = !v.ok;
-    o.textContent = v.ok ? `${v.name} · ${v.users} utenti, ${v.probes} sonde` : `${v.name} · non risponde`;
-    isel.appendChild(o);
-  });
-  if (vms.some(v => v.ok && v.name === iprima)) isel.value = iprima;
-  const multi = vms.length > 1;
-  document.querySelectorAll(".vm-pick").forEach(d => { d.hidden = !multi; });
-  if (!multi) return;
-  const ok = vms.filter(v => v.ok);
-  const best = ok.reduce((a, v) => (!a || v.probes < a.probes ? v : a), null);
-  ["#au-vm", "#inv-vm"].forEach(id => {
-    const sel = $(id), prima = sel.value;
-    sel.innerHTML = "";
-    vms.forEach(v => {
-      const o = document.createElement("option");
-      o.value = v.name; o.disabled = !v.ok;
-      o.textContent = v.ok ? `${v.name} · ${v.users} utenti, ${v.probes} sonde` : `${v.name} · non risponde`;
-      sel.appendChild(o);
-    });
-    sel.value = ok.some(v => v.name === prima) ? prima : (best ? best.name : "");
-  });
-}
-const vmTag = i => (document.querySelector(".vm-pick:not([hidden])") && i.vm) ? el("span", "tag", i.vm) : null;
-
-let USERS = [], USER_VMS = [];
+let USERS = [];
 // Azioni di una riga: il pulsante «Azioni ▾» apre un menu con una voce per azione. items: [testo,
 // funzione, "danger"?] oppure gruppi { group, items } (codice e account nella tabella dei codici).
 // Il menu sta fuori dalla tabella (position fixed), così non viene tagliato dallo scorrimento.
@@ -17143,14 +15759,12 @@ document.addEventListener("keydown", e => {
 addEventListener("scroll", actMenuClose, true);
 addEventListener("resize", actMenuClose);
 function userItems(u) {
-  const altre = USER_VMS.filter(v => v.ok && v.name !== u.vm);
   return [["Limiti…", () => limitsOpen(u)],
           u.blocked ? null : ["Prepara sonde…", () => uprobesOpen(u)],
           ["Scadenza…", () => expiryOpen(u)],
           u.blocked ? null : ["Reinvia codice", b => userCode(u, b)],
           [u.blocked ? "Sblocca" : "Blocca", () => userAction(u, u.blocked ? "unblock" : "block")],
           ["Esporta (file cifrato)", () => userAction(u, "export")],
-          u.vm && altre.length ? ["Sposta su un'altra VM…", () => moveOpen(u)] : null,
           ["Elimina…", () => userAction(u, "delete"), "danger"]];
 }
 // Nuovo codice a un utente registrato: con quello rientra nel suo account scegliendo una nuova password
@@ -17159,7 +15773,7 @@ async function userCode(u, btn) {
                "una nuova password: sonde, storico e impostazioni restano. Finché non lo usa, la password attuale continua a valere.")) return;
   btn.disabled = true;
   try {
-    const r = await api("/api/admin/users/code", { id: u.id, vm: u.vm || "" }, u.vm);
+    const r = await api("/api/admin/users/code", { id: u.id });
     alert(r.warning ? `${r.warning}\n\nCodice: ${r.code}` : `Codice mandato a ${r.sent_to}: vale 7 giorni.`);
     load();
   } catch (e) { alert(e.message); }
@@ -17171,7 +15785,7 @@ try { const s = JSON.parse(localStorage.getItem("netmon.users.sort")); if (s && 
 const USER_STATE_RANK = u => u.blocked ? 3 : u.active ? 0 : u.sessions ? 1 : 2;     // attivi prima, bloccati in fondo
 const PLAN_RANK = { basso: 1, medio: 2, alto: 3, personalizzato: 4 };
 const USER_SORT_KEYS = {
-  email: u => (u.email || "").toLowerCase(), state: USER_STATE_RANK, vm: u => (u.vm || "").toLowerCase(),
+  email: u => (u.email || "").toLowerCase(), state: USER_STATE_RANK,
   plan: u => PLAN_RANK[u.plan] || 0, expiry: u => u.expires || Number.MAX_SAFE_INTEGER,   // senza scadenza in fondo
   created: u => u.created_ts || 0, seen: u => u.last_seen_ts || 0,
   sessions: u => u.sessions || 0, probes: u => u.probes || 0, fritz: u => u.fritz || 0, devices: u => u.devices || 0,
@@ -17193,7 +15807,7 @@ function usersHead() {
       b.onclick = () => {
         const k = th.dataset.sort;
         usersSort = usersSort.key === k ? { key: k, dir: -usersSort.dir }
-          : { key: k, dir: ["email", "state", "vm", "expiry"].includes(k) ? 1 : -1 };   // scadenza: la più vicina prima
+          : { key: k, dir: ["email", "state", "expiry"].includes(k) ? 1 : -1 };   // scadenza: la più vicina prima
         try { localStorage.setItem("netmon.users.sort", JSON.stringify(usersSort)); } catch {}
         render(LAST_USERS_RES);
       };
@@ -17206,20 +15820,13 @@ let LAST_USERS_RES = null;
 function render(res) {
   LAST_USERS_RES = res;
   usersHead();
-  if (res.control) CONTROL = res.control;
   USERS = res.users || [];
-  USER_VMS = res.vms || [];
-  renderVms(res.vms || []);
   const ub = $("#users"); ub.innerHTML = "";
   const active = res.users.filter(u => u.active).length;
   const attesa = res.invites.filter(i => i.email && !i.uses);   // invitati che non si sono ancora registrati
   $("#users-count").textContent = $("#users-count").dataset.base =
     `${res.users.length} account · ${active} attivi ora` + (attesa.length ? ` · ${attesa.length} inviti in attesa` : "");
-  // la colonna VM serve solo con più VM
-  const multiVm = (res.vms || []).length > 1;
-  $("#users-head").querySelector("th[data-sort=vm]").hidden = !multiVm;
-  const vmCell = (tr, vm) => { cell(tr, vm || "").hidden = !multiVm; };
-  if (!res.users.length && !attesa.length) { const tr = el("tr"); cell(tr, "Nessun utente registrato.", "adm-empty").colSpan = 12; ub.appendChild(tr); }
+  if (!res.users.length && !attesa.length) { const tr = el("tr"); cell(tr, "Nessun utente registrato.", "adm-empty").colSpan = 11; ub.appendChild(tr); }
   // sonde con lo stesso token su due dispositivi: l'utente riceve l'avviso, qui solo il riepilogo
   const doppi = res.users.filter(u => (u.dup_probes || []).length);
   $("#users-dup").hidden = !doppi.length;
@@ -17227,11 +15834,10 @@ function render(res) {
     + "l'utente è avvisato): " + doppi.map(u => `${u.email} (${u.dup_probes.map(x => x.name).join(", ")})`).join(" · ") : "";
   usersSorted(res.users).forEach(u => {
     const tr = el("tr", u.blocked ? "is-blocked" : "");
-    tr.dataset.f = [u.email, u.vm || "",
+    tr.dataset.f = [u.email,
       u.blocked ? "bloccato" : u.active ? "attivo ora" : u.sessions ? "sessione aperta" : "non collegato",
       u.plan ? "piano " + u.plan : "", u.expires_text ? (u.expired ? "scaduto" : "scade") : ""].join(" ").toLowerCase();
     cell(tr, u.email);
-    vmCell(tr, u.vm);
     const stato = cell(tr, u.blocked ? el("span", "tag bad", "bloccato")
            : u.active ? el("span", "tag ok", "attivo ora")
            : u.sessions ? el("span", "tag", "sessione aperta") : el("span", "tag", "non collegato"));
@@ -17272,11 +15878,10 @@ function render(res) {
     cell(tr, who);
     const st = el("span", "", null);
     // codice per l'email di un account che c'è già: chi lo usa rientra nel suo account con una nuova password
-    const giaUtente = res.users.some(u => (u.email || "").toLowerCase() === (i.email || "").toLowerCase() && (!i.vm || !u.vm || u.vm === i.vm));
+    const giaUtente = res.users.some(u => (u.email || "").toLowerCase() === (i.email || "").toLowerCase());
     st.appendChild(el("span", "tag " + (scaduto ? "bad" : "warn"),
       scaduto ? "invito scaduto" : giaUtente ? "nuovo codice per l'account" : "invitato"));
     if (giaUtente) tr.title = "Usando questo codice l'utente rientra nel suo account con una nuova password: sonde e storico restano.";
-    vmCell(tr, i.vm);
     cell(tr, st);
     cell(tr, null);
     cell(tr, null);
@@ -17309,14 +15914,13 @@ function render(res) {
     cell(tr, per);
     const st = el("span", "", null);
     st.appendChild(el("span", "tag" + (i.state === "valido" ? " ok" : " bad"), i.state));
-    if (vmTag(i)) st.appendChild(vmTag(i));
     cell(tr, st);
     cell(tr, i.created + (i.created_by ? " · " + i.created_by : ""));
     cell(tr, i.expires || "mai");
     cell(tr, i.max_uses ? `${i.uses} / ${i.max_uses}` : `${i.uses} / ∞`, "num");
     cell(tr, i.last_user ? `${i.last_user} · ${i.last_used}` : "—");
     // il codice e, se qualcuno si è registrato con lui, anche il suo account
-    const chi = i.last_user && USERS.find(u => u.email === i.last_user && (!i.vm || !u.vm || u.vm === i.vm));
+    const chi = i.last_user && USERS.find(u => u.email === i.last_user);
     cell(tr, actMenu(chi ? [{ group: "Codice", items: inviteItems(i) }, { group: chi.email, items: userItems(chi) }]
                          : inviteItems(i)), "acts-cell");
     ib.appendChild(tr);
@@ -17369,7 +15973,7 @@ async function inviteResend(i, btn) {
   if (!confirm(`Reinviare il codice a ${i.email}?\n\nViene creato un codice nuovo: il vecchio link smette di funzionare.`)) return;
   btn.disabled = true;
   try {
-    const r = await api("/api/admin/invites/resend", { id: i.id, vm: i.vm || "" });
+    const r = await api("/api/admin/invites/resend", { id: i.id });
     alert(r.warning || `Codice reinviato a ${r.sent_to}.` + (r.renewed ? " Il codice era scaduto: il nuovo vale 7 giorni." : ""));
     load();
   } catch (e) { alert(e.message); btn.disabled = false; }
@@ -17382,7 +15986,7 @@ async function inviteChangeMail(i, btn) {
   if (nuova === null || !nuova.trim()) return;
   btn.disabled = true;
   try {
-    const r = await api("/api/admin/invites/email", { id: i.id, email: nuova.trim(), vm: i.vm || "" });
+    const r = await api("/api/admin/invites/email", { id: i.id, email: nuova.trim() });
     alert(r.warning || `Invito inviato a ${r.sent_to}.` + (r.renewed ? " Il codice era scaduto: il nuovo vale 7 giorni." : ""));
     load();
   } catch (e) { alert(e.message); btn.disabled = false; }
@@ -17390,7 +15994,7 @@ async function inviteChangeMail(i, btn) {
 async function inviteDelete(i) {
   const cosa = i.email ? `l'invito a ${i.email}` : `il codice accesso_…${i.hint}`;
   if (!confirm(`Eliminare ${cosa}${i.note ? " (" + i.note + ")" : ""}? Non si potrà più usare per registrarsi.`)) return;
-  try { await api("/api/admin/invites/delete", { id: i.id, vm: i.vm || "" }); load(); } catch (e) { alert(e.message); }
+  try { await api("/api/admin/invites/delete", { id: i.id }); load(); } catch (e) { alert(e.message); }
 }
 function inviteItems(i) {
   return [i.email ? ["Reinvia codice", b => inviteResend(i, b)] : null,
@@ -17480,7 +16084,7 @@ $("#lim-go").onclick = async () => {
   $("#lim-go").disabled = true;
   try {
     const plan = $("#lim-plan").value || null;
-    await api("/api/admin/users/limits", { id: limTarget.id, password: pass, max_probes, max_fritz, max_devices, plan }, limTarget.vm);
+    await api("/api/admin/users/limits", { id: limTarget.id, password: pass, max_probes, max_fritz, max_devices, plan });
     $("#dlg-limits").close();
     $("#foot").textContent = `Limiti di ${limTarget.email} aggiornati.`;
     limTarget = null;
@@ -17504,7 +16108,7 @@ async function uprobesOpen(u) {
 async function uprobesLoad() {
   const u = upTarget, list = $("#up-list");
   try {
-    const r = await api("/api/admin/users/probes", { id: u.id }, u.vm);
+    const r = await api("/api/admin/users/probes", { id: u.id });
     list.replaceChildren();
     if (r.blocked) say("#up-msg", `${r.email} è bloccato: sbloccalo prima di preparargli sonde.`, true);
     if (!r.probes.length) list.appendChild(el("li", "hint", "Nessuna sonda in questo account."));
@@ -17531,7 +16135,7 @@ async function uprobeToken(p, btn) {
                               "sonda non manda più dati finché non riceve quello nuovo. Continuare?")) return;
   btn.disabled = true;
   try {
-    const r = await api("/api/admin/users/probes/token", { id: upTarget.id, probe: p.key, password: pass }, upTarget.vm);
+    const r = await api("/api/admin/users/probes/token", { id: upTarget.id, probe: p.key, password: pass });
     say("#up-msg", "");
     uprobeShow(r, `Nuovo token per «${r.name}».`);
   } catch (e) { say("#up-msg", e.message, true); }
@@ -17544,7 +16148,7 @@ $("#up-go").onclick = async () => {
   if (!pass) { say("#up-msg", "Inserisci la tua password di amministratore.", true); $("#up-pass").focus(); return; }
   $("#up-go").disabled = true;
   try {
-    const r = await api("/api/admin/users/probes/new", { id: upTarget.id, name, password: pass }, upTarget.vm);
+    const r = await api("/api/admin/users/probes/new", { id: upTarget.id, name, password: pass });
     say("#up-msg", "");
     $("#up-name").value = "";
     uprobeShow(r, `Sonda «${r.name}» creata nell'account di ${upTarget.email}.`);
@@ -17587,7 +16191,7 @@ $("#ex-go").onclick = async () => {
   }
   $("#ex-go").disabled = true;
   try {
-    const r = await api("/api/admin/users/expiry", { id: exTarget.id, password: pass, date }, exTarget.vm);
+    const r = await api("/api/admin/users/expiry", { id: exTarget.id, password: pass, date });
     $("#dlg-expiry").close();
     $("#foot").textContent = date === null ? `Scadenza di ${exTarget.email} tolta.`
       : `Scadenza di ${exTarget.email} impostata` + (r.mailed ? ": email inviata." : " (email non inviata: controlla l'invio email del server).");
@@ -17608,7 +16212,7 @@ $("#au-go").onclick = async () => {
   $("#au-go").disabled = true; say("#au-msg", "");
   try {
     const res = await api("/api/admin/invites/new", { note: $("#au-note").value.trim(), email: $("#au-email").value.trim(),
-      max_uses: 1, days: Number($("#au-days").value) || null, vm: $("#au-vm").value });
+      max_uses: 1, days: Number($("#au-days").value) || null });
     $("#au-email").value = ""; $("#au-note").value = "";
     if (res.sent_to) {
       $("#au-codebox").hidden = true;
@@ -17627,12 +16231,11 @@ $("#au-copy").onclick = () => copyText($("#au-code"), $("#au-copy"));
 let uaTarget = null;
 function userAction(u, kind) {
   uaTarget = { u, kind };
-  $("#mv-box").hidden = true; mvTarget = null;
   const texts = {
     block: `Bloccare ${u.email}? Le sonde continuano a misurare, ma senza avvisi.`,
     unblock: `Sbloccare ${u.email}? Potrà di nuovo accedere con la sua password.`,
     delete: `Eliminare l'account ${u.email}?`,
-    export: `Esportare ${u.email} con sonde e storico in un file cifrato, per spostarlo su un'altra VM? Si apre solo con la password del file: cancellalo comunque dopo l'importazione.`,
+    export: `Esportare ${u.email} con sonde e storico in un file cifrato, per spostarlo su un altro server? Si apre solo con la password del file: cancellalo comunque dopo l'importazione.`,
   };
   $("#ua-title").textContent = texts[kind];
   $("#ua-modes").hidden = kind !== "delete";
@@ -17696,10 +16299,10 @@ $("#ua-go").onclick = async () => {
     if (fpw !== $("#ua-fpw2").value) { $("#ua-go").disabled = false; return say("#ua-msg", "Le due password del file non coincidono.", true); }
     try {
       say("#ua-msg", "Preparo il file cifrato: con molto storico ci vuole qualche minuto…");
-      const job = await api("/api/admin/transfer/export", { id: u.id, password, file_password: fpw }, u.vm);
-      const res = await transferWait(job.id, u.vm);
+      const job = await api("/api/admin/transfer/export", { id: u.id, password, file_password: fpw });
+      const res = await transferWait(job.id);
       say("#ua-msg", `File cifrato pronto (${(res.size / 1048576).toFixed(1)} MB): lo scarico…`);
-      await transferDownload(job.id, u.vm);
+      await transferDownload(job.id);
       $("#ua-box").hidden = true; uaTarget = null;
       $("#foot").textContent = `${u.email} esportato in un file cifrato: importalo con «Importa un utente» e la sua password.`;
     } catch (e) { say("#ua-msg", e.message, true); }
@@ -17707,7 +16310,7 @@ $("#ua-go").onclick = async () => {
     return;
   }
   try {
-    await api("/api/admin/users/" + kind, kind === "delete" ? { id: u.id, password, mode } : { id: u.id, password }, u.vm);
+    await api("/api/admin/users/" + kind, kind === "delete" ? { id: u.id, password, mode } : { id: u.id, password });
     $("#ua-box").hidden = true; uaTarget = null;
     $("#foot").textContent = { block: `${u.email} bloccato.`, unblock: `${u.email} sbloccato.`,
                                delete: `${u.email} eliminato.` }[kind];
@@ -17724,7 +16327,6 @@ function renderInactive(list) {
   list.forEach(u => {
     const tr = el("tr");
     cell(tr, u.email);
-    cell(tr, u.vm || "—");
     cell(tr, u.deleted);
     cell(tr, u.by === "utente" ? "dall'utente" : u.by);
     cell(tr, String(u.probes), "num");
@@ -17742,7 +16344,7 @@ function renderInactive(list) {
     cell(tr, b, "acts-cell");
     tb.appendChild(tr);
   });
-  if (!list.length) { const tr = el("tr"); cell(tr, "Nessun utente non attivo.", "adm-empty").colSpan = 7; tb.appendChild(tr); }
+  if (!list.length) { const tr = el("tr"); cell(tr, "Nessun utente non attivo.", "adm-empty").colSpan = 6; tb.appendChild(tr); }
   if (iwTarget && !list.some(u => u.id === iwTarget.id)) { $("#iw-box").hidden = true; iwTarget = null; }
 }
 $("#iw-no").onclick = () => { $("#iw-box").hidden = true; iwTarget = null; };
@@ -17752,7 +16354,7 @@ $("#iw-go").onclick = async () => {
   if (!password) return say("#iw-msg", "Inserisci la tua password di amministratore.", true);
   $("#iw-go").disabled = true;
   try {
-    await api("/api/admin/users/inactive/wipe", { id: u.id, password, vm: u.vm || "" }, u.vm);
+    await api("/api/admin/users/inactive/wipe", { id: u.id, password });
     $("#iw-box").hidden = true; iwTarget = null;
     $("#foot").textContent = `Dati di ${u.email} cancellati.`;
     load();
@@ -17760,85 +16362,17 @@ $("#iw-go").onclick = async () => {
   finally { $("#iw-go").disabled = false; $("#iw-pass").value = ""; }
 };
 
-// ---- spostamento di un utente su un'altra VM, con sonde e storico ----
-let mvTarget = null, mvSeq = 0;
-function moveOpen(u) {
-  mvTarget = u;
-  $("#ua-box").hidden = true;
-  $("#mv-title").textContent = `Spostare ${u.email} da ${u.vm} su un'altra VM, con le sue sonde e tutto lo storico?`;
-  const sel = $("#mv-to"); sel.innerHTML = "";
-  USER_VMS.filter(v => v.name !== u.vm).forEach(v => {
-    const o = new Option(v.ok ? `${v.name} · ${v.users} utenti, ${v.probes} sonde` : `${v.name} · non risponde`, v.name);
-    o.disabled = !v.ok; sel.appendChild(o);
-  });
-  const best = USER_VMS.filter(v => v.ok && v.name !== u.vm).sort((a, b) => a.probes - b.probes)[0];
-  if (best) sel.value = best.name;
-  $("#mv-pass").value = ""; say("#mv-msg", "");
-  $("#mv-box").hidden = false;
-  $("#mv-box").scrollIntoView({ block: "nearest", behavior: "smooth" });
-  moveCheck();
-}
-// Prima di spostare: quanto pesa lo storico e se la VM di arrivo ha posto
-async function moveCheck() {
-  const u = mvTarget, to = $("#mv-to").value, ul = $("#mv-check"), seq = ++mvSeq;
-  ul.innerHTML = ""; $("#mv-go").disabled = true;
-  if (!u || !to) return;
-  ul.appendChild(el("li", "", "Controllo lo spazio…"));
-  try {
-    const r = await api("/api/admin/move/check", { id: u.id, vm: u.vm, to });
-    if (seq !== mvSeq) return;
-    ul.innerHTML = "";
-    const rows = r.rows || {};
-    ul.appendChild(el("li", "", `${r.probes.length === 1 ? "1 sonda" : r.probes.length + " sonde"}` +
-      (r.probes.length ? ` (${r.probes.map(p => p.name).join(", ")})` : "") +
-      ` · ${(rows.samples || 0).toLocaleString(LOC)} misure · storico di circa ${fmtBytes(r.bytes)}`));
-    ul.appendChild(el("li", r.ok ? "" : "bad", `Su ${r.to} servono circa ${fmtBytes(r.need)} (storico e riserva), liberi ${fmtBytes(r.free)}.`));
-    (r.problems || []).forEach(t => ul.appendChild(el("li", "bad", t)));
-    if (r.behind.length) ul.appendChild(el("li", "warn", `Programmi vecchi su ${r.behind.join(", ")}: non seguono lo spostamento da sole. ` +
-      "Aggiornale prima, oppure dopo cambia a mano l'indirizzo del server sulla sonda (installa-sonda.sh, opzione 2)."));
-    $("#mv-go").disabled = !r.ok;
-  } catch (e) {
-    if (seq !== mvSeq) return;
-    ul.innerHTML = ""; ul.appendChild(el("li", "bad", e.message));
-  }
-}
-$("#mv-to").onchange = moveCheck;
-$("#mv-no").onclick = () => { $("#mv-box").hidden = true; mvTarget = null; mvSeq++; };
-$("#mv-go").onclick = async () => {
-  const u = mvTarget, to = $("#mv-to").value, password = $("#mv-pass").value;
-  if (!u || !to) return;
-  if (!password) return say("#mv-msg", "Inserisci la tua password di amministratore.", true);
-  $("#mv-go").disabled = $("#mv-to").disabled = true;
-  try {
-    const job = await api("/api/admin/move", { id: u.id, vm: u.vm, to, password });
-    let res;
-    for (;;) {
-      await new Promise(r => setTimeout(r, 1500));
-      const j = await api("/api/admin/transfer/job?id=" + encodeURIComponent(job.id));
-      if (j.step) say("#mv-msg", j.step);
-      if (j.state === "done") { res = j.result; break; }
-      if (j.state === "error") throw new Error(j.detail || "Spostamento non riuscito.");
-    }
-    $("#mv-box").hidden = true; mvTarget = null;
-    $("#foot").textContent = `${res.email} spostato da ${res.from} a ${res.to}` +
-      (res.behind.length ? `: cambia a mano l'indirizzo del server su ${res.behind.join(", ")}.` : ": le sue sonde passano alla VM nuova da sole.");
-    load();
-  } catch (e) { say("#mv-msg", e.message, true); $("#mv-go").disabled = false; }
-  finally { $("#mv-to").disabled = false; $("#mv-pass").value = ""; }
-};
-
 // ---- trasferimento di utenti tra server (Esporta / Importa un utente) ----
-const vmHeaders = vm => (vm && vm !== CONTROL ? { "X-Netmon-VM": vm } : {});
-async function transferWait(id, vm) {
+async function transferWait(id) {
   for (;;) {
     await new Promise(r => setTimeout(r, 1500));
-    const j = await api("/api/admin/transfer/job?id=" + encodeURIComponent(id), undefined, vm);
+    const j = await api("/api/admin/transfer/job?id=" + encodeURIComponent(id));
     if (j.state === "done") return j.result;
     if (j.state === "error") throw new Error(j.detail || "Trasferimento non riuscito.");
   }
 }
-async function transferDownload(id, vm) {
-  const r = await fetch("/api/admin/transfer/download?id=" + encodeURIComponent(id), { cache: "no-store", headers: vmHeaders(vm) });
+async function transferDownload(id) {
+  const r = await fetch("/api/admin/transfer/download?id=" + encodeURIComponent(id), { cache: "no-store" });
   if (!r.ok) { const res = await r.json().catch(() => ({})); throw new Error(typeof res.detail === "string" ? res.detail : "HTTP " + r.status); }
   const blob = await r.blob(), a = document.createElement("a");
   const m = /filename="?([^";]+)"?/.exec(r.headers.get("Content-Disposition") || "");
@@ -17853,8 +16387,8 @@ $("#im-open").onclick = () => {
 };
 $("#im-no").onclick = () => { $("#im-box").hidden = true; IM = null; };
 let IMUP = null;                         // file cifrato già caricato: con un'altra password si riprova senza ricaricarlo
-$("#im-file").onchange = $("#im-vm").onchange = () => { $("#im-confirm").hidden = $("#im-merge").hidden = true; IM = null; IMUP = null; say("#im-msg", ""); };
-// Account già sulla VM: per ogni sonda del backup, su quale sonda dell'account va il suo storico
+$("#im-file").onchange = () => { $("#im-confirm").hidden = $("#im-merge").hidden = true; IM = null; IMUP = null; say("#im-msg", ""); };
+// Account già sul server: per ogni sonda del backup, su quale sonda dell'account va il suo storico
 function imRenderMap(p) {
   const box = $("#im-map"); box.innerHTML = "";
   p.source.forEach(sp => {
@@ -17868,11 +16402,10 @@ function imRenderMap(p) {
   });
 }
 $("#im-up").onclick = async () => {
-  const f = $("#im-file").files[0], vm = $("#im-vm").value;
+  const f = $("#im-file").files[0];
   if (!f) return say("#im-msg", "Scegli lo zip esportato.", true);
-  if (!vm) return say("#im-msg", "Nessuna VM disponibile: collegane una in Server › Tutte le VM.", true);
   const fpw = $("#im-fpw").value;
-  const again = IMUP && IMUP.file === f && IMUP.vm === vm;
+  const again = IMUP && IMUP.file === f;
   const rnd = new Uint8Array(18); crypto.getRandomValues(rnd);
   const id = again ? IMUP.id : btoa(String.fromCharCode(...rnd)).replace(/\+/g, "-").replace(/\//g, "_");
   const PART = 8 * 1024 * 1024, parts = Math.max(1, Math.ceil(f.size / PART));
@@ -17880,37 +16413,35 @@ $("#im-up").onclick = async () => {
   try {
     let res = again ? { encrypted: true } : null;
     for (let i = 0; !again && i < parts; i++) {
-      say("#im-msg", `Caricamento su ${vm}… ${Math.round(i * 100 / parts)}%`);
+      say("#im-msg", `Caricamento… ${Math.round(i * 100 / parts)}%`);
       const r = await fetch(`/api/admin/transfer/upload?id=${id}&part=${i}&parts=${parts}`,
-        { method: "POST", headers: { "Content-Type": "application/octet-stream", ...vmHeaders(vm) },
+        { method: "POST", headers: { "Content-Type": "application/octet-stream" },
           body: f.slice(i * PART, (i + 1) * PART) });
       res = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof res.detail === "string" ? res.detail : "HTTP " + r.status);
     }
     if (res.encrypted) {
-      IMUP = { id, vm, file: f };
+      IMUP = { id, file: f };
       if (!fpw) return say("#im-msg", "Il file è cifrato: scrivi la password del file e premi di nuovo «Carica e controlla».", true);
       say("#im-msg", "Apro il file con la sua password…");
-      res = await api("/api/admin/transfer/open", { id, file_password: fpw }, vm);
+      res = await api("/api/admin/transfer/open", { id, file_password: fpw });
       IMUP = null;
     }
     const p = res.preview, rows = p.rows || {};
-    const altrove = USERS.find(u => (u.email || "").toLowerCase() === p.email && u.vm !== vm);
     const desc = `${p.email} · ${p.probes.length === 1 ? "1 sonda" : p.probes.length + " sonde"}${p.probes.length ? " (" + p.probes.join(", ") + ")" : ""} · ` +
       `${(rows.samples || 0).toLocaleString(LOC)} misure, ${(rows.events || 0).toLocaleString(LOC)} eventi · ` +
       `esportato il ${p.created || "?"} da netmon ${p.source_version || "?"}`;
-    if (altrove && !p.exists) return say("#im-msg", `${desc}. L'account esiste già su ${altrove.vm}: per unirne lo storico scegli quella VM.`, true);
     if (p.exists) {
-      if (!p.target.length) return say("#im-msg", `${desc}. Su ${vm} l'account esiste ma non ha sonde: crea prima le sue sonde, poi importa lo storico.`, true);
-      IM = { id, vm, email: p.email, merge: true };
-      say("#im-msg", `${desc}. Su ${vm} c'è già questo account: scegli come importare lo storico.`);
+      if (!p.target.length) return say("#im-msg", `${desc}. L'account esiste ma non ha sonde: crea prima le sue sonde, poi importa lo storico.`, true);
+      IM = { id, email: p.email, merge: true };
+      say("#im-msg", `${desc}. Questo account c'è già: scegli come importare lo storico.`);
       imRenderMap(p);
       $("#im-merge").hidden = false; $("#im-confirm").hidden = false; $("#im-pass").value = "";
       return;
     }
-    if (p.clash.length) return say("#im-msg", `${desc}. Su ${vm} ci sono già sonde con le stesse chiavi (${p.clash.join(", ")}).`, true);
-    IM = { id, vm, email: p.email };
-    say("#im-msg", `${desc}. Pronto per l'importazione su ${vm}.` + (res.plain ? " Attenzione: file non cifrato (esportato da una versione precedente)." : ""));
+    if (p.clash.length) return say("#im-msg", `${desc}. Ci sono già sonde con le stesse chiavi (${p.clash.join(", ")}).`, true);
+    IM = { id, email: p.email };
+    say("#im-msg", `${desc}. Pronto per l'importazione.` + (res.plain ? " Attenzione: file non cifrato (esportato da una versione precedente)." : ""));
     $("#im-confirm").hidden = false; $("#im-pass").value = ""; $("#im-pass").focus();
   } catch (e) { say("#im-msg", e.message, true); }
   finally { $("#im-up").disabled = false; }
@@ -17929,19 +16460,19 @@ $("#im-go").onclick = async () => {
       const n = Object.keys(body.map).length;
       if (!n) { $("#im-go").disabled = false; return say("#im-msg", "Abbina almeno una sonda del backup a una sonda dell'account.", true); }
       if (new Set(Object.values(body.map)).size !== n) { $("#im-go").disabled = false; return say("#im-msg", "Ogni sonda dell'account può ricevere lo storico di una sola sonda del backup.", true); }
-      if (body.history === "overwrite" && !confirm("Sovrascrivere? Nel periodo coperto dal backup i dati di queste sonde sulla VM vengono sostituiti da quelli del backup.")) { $("#im-go").disabled = false; return; }
+      if (body.history === "overwrite" && !confirm("Sovrascrivere? Nel periodo coperto dal backup i dati di queste sonde sul server vengono sostituiti da quelli del backup.")) { $("#im-go").disabled = false; return; }
     }
-    const job = await api("/api/admin/transfer/import", body, IM.vm);
-    say("#im-msg", `Importazione di ${IM.email} su ${IM.vm} in corso…`);
-    const res = await transferWait(job.id, IM.vm);
+    const job = await api("/api/admin/transfer/import", body);
+    say("#im-msg", `Importazione di ${IM.email} in corso…`);
+    const res = await transferWait(job.id);
     if (res.history) {
-      say("#im-msg", `Storico di ${res.email} ${res.history === "overwrite" ? "sovrascritto" : "unito"} su ${IM.vm}: `
+      say("#im-msg", `Storico di ${res.email} ${res.history === "overwrite" ? "sovrascritto" : "unito"}: `
         + `${(res.rows || 0).toLocaleString(LOC)} righe importate su ${res.probes === 1 ? "1 sonda" : res.probes + " sonde"}.`);
       $("#im-confirm").hidden = $("#im-merge").hidden = true; $("#im-file").value = ""; IM = null;
       return;
     }
-    say("#im-msg", `${res.email} importato su ${IM.vm} con ${res.probes === 1 ? "1 sonda" : res.probes + " sonde"}. Le sonde trovano la VM da sole ` +
-                   `quando il loro indirizzo porta al gateway.`);
+    say("#im-msg", `${res.email} importato con ${res.probes === 1 ? "1 sonda" : res.probes + " sonde"}. Se le sonde scrivono ancora ` +
+                   `al vecchio server, cambia sulla sonda l'indirizzo del server in ${location.origin}/api/report.`);
     $("#im-confirm").hidden = true; $("#im-file").value = ""; IM = null;
     load();
   } catch (e) { say("#im-msg", e.message, true); }
@@ -18155,7 +16686,7 @@ $("#rt-save").onclick = async () => {
   finally { $("#rt-save").disabled = false; }
 };
 
-// ---- invio email: si sceglie sul gateway e passa a tutte le VM ----
+// ---- invio email: l'account da cui partono le email ----
 function emShow(r) {
   $("#em-now").textContent = r.source === "pannello" ? `${r.host} · scelto qui`
     : r.source === ".env" ? `${r.host} · dal .env` : "non configurato";
@@ -18182,14 +16713,13 @@ async function emSave(useEnv) {
     host: $("#em-host").value.trim(), port: Number($("#em-port").value), user: $("#em-user").value.trim(),
     smtp_password: $("#em-pw").value, sender: $("#em-from").value.trim(), sender_name: $("#em-name").value.trim(), password };
   if (!useEnv && !body.host) return say("#em-msg", "Indica il server SMTP (per Gmail: smtp.gmail.com).", true);
-  if (useEnv && !confirm("Tornare alle righe SMTP_… del .env di ogni macchina? L'account scelto qui viene tolto da tutte le VM.")) return;
+  if (useEnv && !confirm("Tornare alle righe SMTP_… del .env? L'account scelto qui viene tolto.")) return;
   $("#em-save").disabled = $("#em-env").disabled = true;
   say("#em-msg", "Salvataggio in corso…");
   try {
     const r = await api("/api/admin/email", body);
     emShow(r);
-    say("#em-msg", (useEnv ? "Ora valgono le righe del .env." : `Salvato e mandato a ${r.vms} VM.`)
-      + (r.warning ? " " + r.warning : " Prova l'invio qui sotto."), !!r.warning);
+    say("#em-msg", (useEnv ? "Ora valgono le righe del .env." : "Salvato.") + " Prova l'invio qui sotto.");
   } catch (e) { say("#em-msg", e.message, true); }
   finally { $("#em-save").disabled = $("#em-env").disabled = false; $("#em-pass").value = ""; }
 }
@@ -18199,12 +16729,12 @@ $("#em-test").onclick = async () => {
   const to = $("#em-to").value.trim(), ul = $("#em-results");
   if (!to.includes("@")) return say("#em-msg", "Indica l'indirizzo a cui mandare la prova.", true);
   $("#em-test").disabled = true; ul.hidden = false; ul.innerHTML = "";
-  ul.appendChild(el("li", "", "Invio in corso dal gateway e dalle VM…"));
+  ul.appendChild(el("li", "", "Invio in corso…"));
   try {
     const r = await api("/api/admin/email/test", { to });
     ul.innerHTML = "";
     r.results.forEach(x => ul.appendChild(el("li", x.ok ? "ok" : "bad",
-      x.ok ? `${x.vm}: inviata, controlla la casella (anche lo spam)` : `${x.vm}: non inviata (${x.error})`)));
+      x.ok ? "Inviata, controlla la casella (anche lo spam)" : `Non inviata (${x.error})`)));
   } catch (e) { ul.innerHTML = ""; ul.appendChild(el("li", "bad", e.message)); }
   finally { $("#em-test").disabled = false; }
 };
@@ -18323,7 +16853,7 @@ $("#inv-new").onclick = async () => {
   try {
     const email = $("#inv-email").value.trim();
     const res = await api("/api/admin/invites/new", { note: $("#inv-note").value.trim(), email,
-      max_uses: Number($("#inv-uses").value), days: Number($("#inv-days").value) || null, vm: $("#inv-vm").value });
+      max_uses: Number($("#inv-uses").value), days: Number($("#inv-days").value) || null });
     $("#inv-code").textContent = res.code; $("#inv-copy").textContent = "Copia"; $("#inv-box").hidden = false;
     $("#inv-sent").textContent = res.sent_to ? `Inviato via email a ${res.sent_to}: vale solo per quell'indirizzo.`
                                : (res.warning || "Copialo ora: non verrà mostrato di nuovo.");
@@ -18431,8 +16961,7 @@ function renderSchedules(tbody, list, pagerId) {
     const tr = el("tr");
     cell(tr, s.at - s.created < 90 ? "subito · " + whenVm(s.at) : whenVm(s.at));
     cell(tr, s.what);
-    cell(tr, (s.vm && allVms() && s.target !== "vm" ? s.vm + " · " : "")
-      + (s.target === "vm" ? "VM" : s.names ? s.names.join(", ") : "tutte le sonde"));
+    cell(tr, s.target === "vm" ? "VM" : s.names ? s.names.join(", ") : "tutte le sonde");
     const [label, cls] = SCHED_STATES[s.state] || [s.state, ""];
     cell(tr, el("span", "tag " + cls, label));
     cell(tr, s.created_by || "—");
@@ -18442,7 +16971,7 @@ function renderSchedules(tbody, list, pagerId) {
       b.onclick = async () => {
         if (!confirm(`Annullare «${s.what}» ${s.target === "vm" ? "della VM" : "delle sonde"} del ${whenVm(s.at)}?`)) return;
         b.disabled = true;
-        try { await api("/api/admin/schedules/cancel", { id: s.id }, s.vm || CUR_VM); currentPage === "vm" ? loadVm() : loadProbes(); }
+        try { await api("/api/admin/schedules/cancel", { id: s.id }); currentPage === "vm" ? loadVm() : loadProbes(); }
         catch (e) { alert(e.message); b.disabled = false; }
       };
       cell(tr, b, "acts-cell");
@@ -18459,9 +16988,8 @@ const PR_STATES = { online: ["in linea", "ok"], late: ["in ritardo", "warn"], of
                     paused: ["in pausa", "warn"] };
 async function loadProbes() {
   clearTimeout(probeTimer);
-  await VMS_READY;                         // con più VM l'elenco è di tutte: serve sapere quali sono
   try {
-    probeData = allVms() ? await api("/api/admin/probes/all") : await vmApi("/api/admin/probes");
+    probeData = await api("/api/admin/probes");
     renderProbes();
     $("#foot").className = "foot";
     $("#foot").textContent = "Aggiornato alle " + new Date().toLocaleTimeString(LOC);
@@ -18474,40 +17002,31 @@ async function loadProbes() {
 function renderProbes() {
   const res = probeData, tb = $("#pr-rows"), dist = res.dist_version;
   tb.innerHTML = "";
-  const multi = allVms();
-  document.querySelectorAll(".pr-vm-col").forEach(e => { e.hidden = !multi; });
-  const keys = new Set(res.probes.map(prId));
+  const keys = new Set(res.probes.map(p => p.key));
   [...prSel].forEach(k => { if (!keys.has(k)) prSel.delete(k); });
   const online = res.probes.filter(p => p.state === "online").length;
-  // aggiornata = versione del server (della sua VM), oppure una precedente con i programmi della sonda identici
-  const distOf = p => res.dist ? (res.dist[p.vm] || {}) : { version: dist, same: res.dist_same || [] };
-  const isOldP = p => { const d = distOf(p); return !!d.version && p.version !== d.version && !(d.same || []).includes(p.version); };
+  // aggiornata = versione del server, oppure una precedente con i programmi della sonda identici
+  const same = res.dist_same || [];
+  const isOldP = p => !!dist && p.version !== dist && !same.includes(p.version);
   const old = res.probes.filter(isOldP).length;
-  const vecchie = multi ? vmsBehind() : [];
-  $("#ps-behind").hidden = !vecchie.length;
-  $("#ps-behind").textContent = vecchie.length ? `${vecchie.map(v => `${v} ha ancora netmon ${VM_VERS[v].version}`).join(", ")}, ${vecchie.length > 1 ? "più vecchie" : "più vecchia"} `
-    + `del gateway (${VM_VERS[CONTROL].version}). Ogni sonda si aggiorna alla versione della sua VM: per portare all'ultima `
-    + `versione anche le sonde di ${vecchie.join(", ")}, aggiorna prima ${vecchie.length > 1 ? "le VM" : "la VM"} (Server › Aggiornamento Netmon).` : "";
-  $("#pr-count").dataset.base = `${res.probes.length} sonde · ${online} in linea` + (old ? ` · ${old} da aggiornare` : "")
-    + (res.down && res.down.length ? ` · non rispondono: ${res.down.join(", ")}` : "");
-  if (!res.probes.length) { const tr = el("tr"); cell(tr, "Nessuna sonda collegata a un account.", "adm-empty").colSpan = 8; tb.appendChild(tr); }
+  $("#pr-count").dataset.base = `${res.probes.length} sonde · ${online} in linea` + (old ? ` · ${old} da aggiornare` : "");
+  if (!res.probes.length) { const tr = el("tr"); cell(tr, "Nessuna sonda collegata a un account.", "adm-empty").colSpan = 7; tb.appendChild(tr); }
   res.probes.forEach(p => {
     const c = p.command, busy = c && (c.state === "pending" || c.state === "running");
     const isOld = isOldP(p);
     const [sl, sc] = PR_STATES[p.state] || [p.state, ""];
     const tr = el("tr");
-    tr.dataset.f = [p.name, p.owner, p.vm || "", p.version || "", p.model || "", sl].join(" ").toLowerCase();
-    tr.dataset.key = prId(p); tr.dataset.state = p.state; tr.dataset.old = isOld ? "1" : ""; tr.dataset.busy = busy ? "1" : "";
-    const cb = el("input"); cb.type = "checkbox"; cb.checked = prSel.has(prId(p));
+    tr.dataset.f = [p.name, p.owner, p.version || "", p.model || "", sl].join(" ").toLowerCase();
+    tr.dataset.key = p.key; tr.dataset.state = p.state; tr.dataset.old = isOld ? "1" : ""; tr.dataset.busy = busy ? "1" : "";
+    const cb = el("input"); cb.type = "checkbox"; cb.checked = prSel.has(p.key);
     cb.setAttribute("aria-label", "Seleziona " + p.name);
-    cb.onchange = () => { cb.checked ? prSel.add(prId(p)) : prSel.delete(prId(p)); updateSel(); };
+    cb.onchange = () => { cb.checked ? prSel.add(p.key) : prSel.delete(p.key); updateSel(); };
     cell(tr, cb, "sel");
     const nm = el("span", "", p.name);
     nm.appendChild(el("span", "sub", `${p.devices} ${p.devices === 1 ? "dispositivo" : "dispositivi"}`));
     if (p.model) nm.title = p.model;
     cell(tr, nm);
     cell(tr, p.owner || "—");
-    if (multi) cell(tr, el("span", "tag", p.vm || "—"), "pr-vm-col");
     const spia = el("span", "tag " + sc, sl);
     if (p.state === "paused") spia.title = "Nessun avviso"
       + (p.paused_until ? " fino al " + p.paused_until : " finché il proprietario non la riprende")
@@ -18598,29 +17117,13 @@ $("#ps-go").onclick = async () => {
   if (sel && !prSel.size) return say("#ps-msg", "Seleziona almeno una sonda nella tabella, oppure scegli «Tutte».", true);
   if (!password) return say("#ps-msg", "Inserisci la tua password di amministratore.", true);
   const who = sel ? `${prSel.size} ${prSel.size === 1 ? "sonda selezionata" : "sonde selezionate"}` : "tutte le sonde";
-  // ogni sonda scarica netmon dalla SUA VM: una VM più vecchia del gateway la porta solo alla sua versione
-  const vecchie = cmd === "update" && allVms() ? vmsBehind() : [];
-  const avviso = vecchie.length ? `ATTENZIONE: ${vecchie.map(v => `${v} ha ancora netmon ${VM_VERS[v].version}`).join(", ")}. `
-    + `Ogni sonda si aggiorna alla versione della sua VM: per portare all'ultima versione anche le sonde di ${vecchie.join(", ")}, `
-    + `aggiorna prima ${vecchie.length > 1 ? "le VM" : "la VM"} (Server › Aggiornamento Netmon).` : "";
-  if (!confirm(`${CMD_NAMES[cmd]} per ${who} ${now ? "adesso" : "il " + whenVm(at)}?\n\n${avviso ? avviso + "\n\n" : ""}Proprietari e amministratori riceveranno un avviso.`)) return;
+  if (!confirm(`${CMD_NAMES[cmd]} per ${who} ${now ? "adesso" : "il " + whenVm(at)}?\n\nProprietari e amministratori riceveranno un avviso.`)) return;
   $("#ps-go").disabled = true;
   try {
-    if (allVms()) {
-      const probes = sel ? [...prSel].map(id => { const i = id.indexOf("|"); return { vm: id.slice(0, i), key: id.slice(i + 1) }; }) : null;
-      const r = await api("/api/admin/schedules/all", { cmd, at, password, probes });
-      $("#ps-pass").value = "";
-      const vms = r.done.map(d => d.vm).join(", ");
-      say("#ps-msg", (now ? `Inviato alle sonde di ${vms}: lo ricevono al prossimo controllo.`
-                          : `Programmato per il ${whenVm(at)} su ${vms}. Proprietari e amministratori hanno ricevuto un avviso.`)
-        + (r.problems.length ? " Non riuscito: " + r.problems.join(" · ") : "") + (avviso ? " " + avviso : ""),
-        !!r.problems.length || !!avviso);
-    } else {
-      const r = await vmApi("/api/admin/schedules", { target: "probes", cmd, at, password, probes: sel ? [...prSel] : null });
-      $("#ps-pass").value = "";
-      say("#ps-msg", now ? `Inviato: ${r.schedule.result || "le sonde lo ricevono al prossimo controllo"}.`
-                         : `Programmato per il ${whenVm(at)}. Proprietari e amministratori hanno ricevuto un avviso.`);
-    }
+    const r = await api("/api/admin/schedules", { target: "probes", cmd, at, password, probes: sel ? [...prSel] : null });
+    $("#ps-pass").value = "";
+    say("#ps-msg", now ? `Inviato: ${r.schedule.result || "le sonde lo ricevono al prossimo controllo"}.`
+                       : `Programmato per il ${whenVm(at)}. Proprietari e amministratori hanno ricevuto un avviso.`);
     loadProbes();
   } catch (e) { say("#ps-msg", e.message, true); }
   finally { $("#ps-go").disabled = false; }
@@ -18648,7 +17151,6 @@ function showPage(page, remember = true, sub = null) {
   const cur = list.find(s => s.key === sub);
   const pn = $("#pagename"); pn.textContent = "";
   if (cur) pn.append(el("span", "crumb", nome + " › "), cur.label); else pn.textContent = nome;
-  showVmPicker();
   document.title = (cur ? cur.label : nome) + " · netmon";
   if (!navWide()) setNav(false, false);
   if (remember) {
@@ -18743,142 +17245,10 @@ function scheduleVm(ms) {
   vmTimer = setTimeout(() => { if (currentPage === "vm" && !document.hidden) loadVm(); else scheduleVm(ms); }, ms);
 }
 
-/*__TOPO_JS__*/
-let vmsTopoLast = null;
-// mappa aperta o chiusa: scelta ricordata nel browser; riaprendola si ridisegna alla larghezza giusta
-(() => {
-  const d = $("#vms-topo-fold");
-  try { if (localStorage.getItem("netmon.admfold.vms-topo") === "1") d.open = false; } catch {}
-  d.addEventListener("toggle", () => {
-    try { localStorage.setItem("netmon.admfold.vms-topo", d.open ? "0" : "1"); } catch {}
-    if (d.open && vmsTopoLast) vmsTopoLast();
-  });
-})();
-addEventListener("resize", () => { clearTimeout(drawTopo.t); drawTopo.t = setTimeout(() => vmsTopoLast && vmsTopoLast(), 200); });
-function vmsTopo(vms, control) {
-  const svg = $("#vms-topo");
-  const host = u => (u || "").replace(/^https?:\/\//, "").replace(/:\d+$/, "").replace(/\/.*$/, "");
-  const me = vms.find(v => v.me) || { name: control || "gateway" };
-  const hub = { id: me.name, name: me.name, ip: me.ip || "", sub: location.host,
-                title: `${me.name} (orchestratore e gateway) · ${me.version || ""}\n${location.host}` };
-  const nodes = vms.filter(v => !v.me).map(v => {
-    const state = !v.ok ? "bad" : v.reboot ? "warn" : (v.ms || 0) > 150 ? "slow" : "ok";
-    const what = !v.ok ? "non risponde" : v.reboot ? "da riavviare" : state === "slow" ? "lenta" : "collegata";
-    return { id: v.name, name: v.name, ip: host(v.url), state, ms: v.ok ? v.ms : null,
-             sub: host(v.public), sub2: v.ok ? `${v.version || "?"} · ${v.probes_online}/${v.probes_total} sonde` : what,
-             title: `${v.name}: ${what}` + (v.ok ? ` (${v.ms} ms)` : "") + `\n${v.url || ""}` + (v.public ? `\n${v.public}` : "") };
-  });
-  vmsTopoLast = () => drawTopo(svg, hub, nodes, n => {
-    CUR_VM = n.id; $("#cur-vm").value = n.id;
-    try { sessionStorage.setItem("netmon.admvm", n.id); } catch {}
-    loadedPage = null; showPage("vm", true, "manutenzione-della-vm");
-  });
-  vmsTopoLast();
-}
-
-// Più VM dietro il gateway: una riga per VM, letta da questa VM sulla rete privata
-async function loadVms() {
-  let res;
-  try { res = await api("/api/admin/vms"); } catch (e) { return; }
-  const vms = res.vms || [];
-  fillVmPicker(vms, res.control);
-  // La tabella e «Collega una VM» si vedono solo nella sezione «Tutte le VM» (la sceglie showPage):
-  // qui si toglie la sezione dal menu quando non ci sono VM, senza mostrarla nelle altre sezioni.
-  const vmsNav = document.querySelector('.subtabs button[data-page="vm"][data-sub="tutte-le-vm"]');
-  if (vmsNav) vmsNav.hidden = !vms.length;
-  if (!vms.length) $("#vms-card").hidden = true;
-  $("#vms-manage").hidden = !res.manage;
-  if (!vms.length) return;
-  vmaPending(res);
-  const down = vms.filter(v => !v.ok).length;
-  $("#vms-sub").textContent = `${vms.length} VM` + (down ? ` · ${down} non rispondono` : " · tutte attive");
-  vmsTopo(vms, res.control);
-  const tb = $("#vms-rows"); tb.innerHTML = "";
-  vms.forEach(v => {
-    const tr = el("tr", v.ok ? "" : "is-blocked");
-    const name = el("span", "", v.name);
-    if (v.me) name.appendChild(el("span", "src", "orchestratore"));
-    if (v.name === CUR_VM && vms.length > 1) name.appendChild(el("span", "tag", "aperta"));
-    if (v.url) { name.appendChild(el("br")); name.appendChild(el("small", "who", v.url.replace(/^https?:\/\//, ""))); }
-    if (v.public && /^https:\/\//.test(v.public)) {
-      const a = el("a", "", v.public.replace(/^https?:\/\//, "")); a.href = v.public; a.target = "_blank"; a.rel = "noopener";
-      name.appendChild(el("br")); name.appendChild(a);
-    }
-    cell(tr, name);
-    const acts = el("span");
-    if (res.manage && !v.me) {
-      const bDel = el("button", "danger", "Togli"); bDel.type = "button";
-      bDel.onclick = () => vmRemove(v);
-      acts.appendChild(bDel);
-    }
-    if (!v.ok) {
-      cell(tr, el("span", "tag bad", "non risponde"));
-      for (let k = 0; k < 8; k++) cell(tr, "—", k >= 1 && k <= 6 ? "num" : "");
-      cell(tr, acts, "acts-cell");
-      tb.appendChild(tr); return;
-    }
-    const st = el("span", "tag ok", "attiva");
-    cell(tr, v.reboot ? [st, el("span", "tag warn", "da riavviare")].reduce((s, t) => (s.appendChild(t), s), el("span")) : st);
-    cell(tr, v.version || "—");
-    cell(tr, String(v.users), "num");
-    cell(tr, `${v.probes_online} / ${v.probes_total}`, "num").title = "Sonde collegate su quelle registrate";
-    cell(tr, v.cpu_percent != null ? `${Math.round(v.cpu_percent)}%` : "—", "num").title = `Carico ${v.load1} su ${v.cpus} CPU`;
-    const memUsed = v.mem_total && v.mem_available != null ? v.mem_total - v.mem_available : null;
-    cell(tr, memUsed != null ? `${pctOf(memUsed, v.mem_total)}%` : "—", "num").title =
-      memUsed != null ? `${fmtBytes(memUsed)} su ${fmtBytes(v.mem_total)}` : "";
-    cell(tr, `${pctOf(v.disk_used, v.disk_total)}%`, "num").title = `${fmtBytes(v.disk_used)} su ${fmtBytes(v.disk_total)}`;
-    cell(tr, fmtBytes(v.data_total), "num");
-    cell(tr, fmtUptime(v.uptime));
-    cell(tr, acts, "acts-cell");
-    tb.appendChild(tr);
-  });
-}
-
-// ---- collegare e togliere VM (sull'orchestratore) ----
-function vmaPending(res) {
-  const next = "vm" + (Math.max(0, ...(res.vms || []).map(v => Number((v.name.match(/\d+$/) || [0])[0]))) + 1);
-  $("#vma-name").placeholder = next;
-  const p = res.pending || [];
-  $("#vma-pending").textContent = p.length
-    ? "Token in attesa di essere usati: " + p.map(t => `${t.name} (fino alle ${whenVm(t.expires)})`).join(", ") + "." : "";
-}
-$("#vma-go").onclick = async () => {
-  const name = ($("#vma-name").value.trim() || $("#vma-name").placeholder).toLowerCase(), password = $("#vma-pass").value;
-  if (!password) return say("#vma-msg", "Inserisci la tua password di amministratore.", true);
-  $("#vma-go").disabled = true; say("#vma-msg", "");
-  try {
-    const r = await api("/api/admin/vms/token", { name, password });
-    $("#vma-cmd").textContent =
-`# carica nella home della VM lo zip netmon-${r.version}.zip, poi:
-cd ~ && rm -rf ~/netmon && unzip -q netmon-${r.version}.zip
-sudo bash ~/netmon/server/installa-server.sh --dietro-gateway
-# indirizzo del gateway: ${location.host}
-# token della VM ${r.name}: ${r.token}`;
-    $("#vma-box").hidden = false; $("#vma-copy").textContent = "Copia";
-    say("#vma-msg", `Token per ${r.name} pronto: copialo ora, non verrà mostrato di nuovo.`
-      + (r.exists ? ` ${r.name} è già collegata: con questo token riceve una chiave nuova.` : ""));
-    $("#vma-name").value = "";
-    loadVms();
-  } catch (e) { say("#vma-msg", e.message, true); }
-  finally { $("#vma-go").disabled = false; $("#vma-pass").value = ""; }
-};
-$("#vma-copy").onclick = () => copyText($("#vma-cmd"), $("#vma-copy"));
-async function vmRemove(v) {
-  const password = prompt(`Togliere la VM ${v.name} dall'elenco? Si può solo se non ha utenti né sonde.\n\nLa tua password di amministratore:`);
-  if (!password) return;
-  try {
-    await api("/api/admin/vms/remove", { name: v.name, password });
-    if (CUR_VM === v.name) CUR_VM = CONTROL;
-    $("#foot").textContent = `VM ${v.name} tolta dall'elenco. Puoi spegnerla.`;
-    loadVms();
-  } catch (e) { alert(e.message); }
-}
-
 async function loadVm(check) {
   if (vmRebooting) return;
-  loadVms();
   try {
-    renderVm(await vmApi("/api/admin/vm" + (check ? "?check=1" : "")));
+    renderVm(await api("/api/admin/vm" + (check ? "?check=1" : "")));
     $("#foot").className = "foot";
     $("#foot").textContent = "Aggiornato alle " + new Date().toLocaleTimeString(LOC);
   } catch (e) {
@@ -18916,7 +17286,7 @@ function memBlock() {
   btn.type = "button";
   btn.onclick = async () => {
     memOpen = !memOpen; memMsg = "";
-    if (memOpen) { try { memData = await vmApi("/api/admin/vm/memory"); } catch (e) { memMsg = e.message; } }
+    if (memOpen) { try { memData = await api("/api/admin/vm/memory"); } catch (e) { memMsg = e.message; } }
     wrap.replaceWith(memBlock());
   };
   wrap.appendChild(btn);
@@ -18951,7 +17321,7 @@ function memBlock() {
   trim.onclick = async () => {
     trim.disabled = true;
     try {
-      const r = await vmApi("/api/admin/vm/memory/trim", {});
+      const r = await api("/api/admin/vm/memory/trim", {});
       memData = r.detail;
       const freed = (r.before || 0) - (r.after || 0);
       memMsg = freed > 0 ? `Liberati ${fmtBytes(freed)} dal server netmon.` : "Niente da liberare: il server non tratteneva memoria inutilizzata.";
@@ -19102,7 +17472,7 @@ async function vmAction(kind) {
   if (!confirm(q)) return;
   $("#vm-upgrade").disabled = $("#vm-reboot").disabled = true;
   try {
-    await vmApi("/api/admin/vm/" + kind, { password });
+    await api("/api/admin/vm/" + kind, { password });
     $("#vm-pass").value = "";
     if (kind === "upgrade") { say("#vm-msg", "Aggiornamento avviato."); $("#vm-log-box").open = true; setTimeout(loadVm, 1500); return; }
     waitReboot();
@@ -19113,66 +17483,15 @@ async function vmAction(kind) {
 }
 // ---- aggiornamento di netmon da pacchetto ----
 let pkWatching = null;                 // versione attesa dopo l'installazione
-// Esito sulle VM dell'ultima installazione dal gateway: salvato prima che il gateway si riavvii,
-// mostrato dopo il ricaricamento della pagina (altrimenti un rifiuto di una VM sparirebbe con lui)
-const pkLastVms = (() => {
-  try {
-    const v = JSON.parse(sessionStorage.getItem("netmon.pk.vms") || "null");
-    sessionStorage.removeItem("netmon.pk.vms");
-    return v && Date.now() - v.at < 30 * 60 * 1000 ? v.text : null;
-  } catch { return null; }
-})();
 function renderPkChecks(res) {
   const ul = $("#pk-checks"); ul.innerHTML = ""; ul.hidden = false;
   if (res.up_to_date) {
-    ul.appendChild(el("li", "head info", `${CUR_VM === CONTROL && VM_LIST.length > 1 ? "Il gateway" : "Questa VM"} ha già la versione ${res.installed}: aggiornamento non necessario`));
+    ul.appendChild(el("li", "head info", `Il server ha già la versione ${res.installed}: aggiornamento non necessario`));
     return;
   }
   ul.appendChild(el("li", "head " + (res.ok ? "ok" : "bad"),
     res.ok ? `Pacchetto idoneo: versione ${res.version}` : "Pacchetto NON idoneo: non verrà installato"));
   (res.checks || []).forEach(([st, t]) => ul.appendChild(el("li", st, t)));
-}
-const verKey = v => (String(v || "").match(/\d+/g) || []).map(Number);
-function verCmp(a, b) {
-  const x = verKey(a), y = verKey(b);
-  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
-  return 0;
-}
-// Dal gateway il pacchetto va anche alle VM, come per le sonde: solo a quelle con una versione più vecchia
-let pkPlan = null;                         // { here: aggiorna anche il gateway, vms: da aggiornare, skip: testi }
-function pkRenderPlan(res) {
-  pkPlan = null;
-  const multi = CUR_VM === CONTROL && VM_LIST.length > 1 && !!res.version;
-  $("#pk-vms-note").hidden = !multi;
-  if (!multi) return;
-  const ul = $("#pk-checks"), vms = [], skip = [], current = [];
-  ul.appendChild(el("li", "head", "VM collegate"));
-  VM_LIST.filter(n => n !== CONTROL).forEach(n => {
-    const v = VM_VERS[n] || {};
-    let st, t;
-    if (!v.ok) { st = "warn"; t = `${n}: non risponde, non viene aggiornata`; skip.push(`${n} non risponde`); }
-    else if (verCmp(v.version, res.version) >= 0) {
-      st = "info"; t = `${n}: ha già la versione ${v.version}, aggiornamento non necessario`; skip.push(`${n} già aggiornata`); current.push(n);
-    } else { st = "ok"; t = `${n}: da aggiornare (${v.version || "?"} → ${res.version})`; vms.push(n); }
-    ul.appendChild(st === "ok" ? pkPick(n, t) : el("li", st, t));
-  });
-  // anche il gateway si può escludere: per esempio per aggiornare prima una sola VM e provarla
-  if (res.ok) ul.appendChild(pkPick(CONTROL, `${CONTROL}: da aggiornare (${res.installed || "?"} → ${res.version})`));
-  pkPlan = { here: !!res.ok, vms, skip, current, sel: new Set([...vms, ...(res.ok ? [CONTROL] : [])]) };
-}
-// VM con una versione di netmon più vecchia del gateway (le loro sonde non arrivano all'ultima)
-function vmsBehind() {
-  const gw = (VM_VERS[CONTROL] || {}).version;
-  return gw ? VM_LIST.filter(n => n !== CONTROL && VM_VERS[n] && VM_VERS[n].ok && VM_VERS[n].version
-                                  && verCmp(VM_VERS[n].version, gw) < 0) : [];
-}
-// riga con la casella per scegliere se aggiornare quella VM (di partenza: sì)
-function pkPick(vm, text) {
-  const li = el("li", "pick"), lab = el("label"), cb = el("input");
-  cb.type = "checkbox"; cb.checked = true;
-  cb.onchange = () => { cb.checked ? pkPlan.sel.add(vm) : pkPlan.sel.delete(vm); };
-  lab.append(cb, el("span", "", text)); li.appendChild(lab);
-  return li;
 }
 const pkPlanned = res => (res.schedules || []).find(s => s.cmd === "package" && (s.state === "pending" || s.state === "running"));
 function renderPackage(res) {
@@ -19194,22 +17513,17 @@ function renderPackage(res) {
   }
   else if (su.state === "ok") { text = `Ultima installazione da pacchetto: versione ${su.version}, il ${whenVm(su.finished)}.`; cls = "ok"; }
   else if (su.state === "error") { text = `Ultima installazione da pacchetto non riuscita${su.finished ? " il " + whenVm(su.finished) : ""}: controlla il registro.`; cls = "bad"; }
-  if (pkLastVms && !running) {
-    text = (text ? text + " " : "") + "Esito sulle VM: " + pkLastVms + ".";
-    const bene = /: (avviata|programmata)|già aggiornata|esclusa|: sonde (avviate|programmate)/;   // anche con l'avviso «nessuna sonda»
-    if (pkLastVms.split(" · ").some(x => !bene.test(x))) cls = "bad";
-  }
   const ps = $("#pk-status"); ps.className = "maint-status " + cls; ps.textContent = text;
   const lb = $("#pk-log-box"); lb.hidden = !res.self_log;
   if (res.self_log) { $("#pk-log").textContent = res.self_log; if (running) lb.open = true; }
-  if (!(CUR_VM === CONTROL && VM_LIST.length > 1)) pkChoices = res.probe_choices || [];   // gateway: quelle di tutte le VM, al caricamento
+  pkChoices = res.probe_choices || [];
   if (res.staged && $("#pk-go-box").hidden && !running) {
     pkProbesChanged = res.staged.probes_changed || null;
     pkShowForm(res.staged.version);
   }
   if (!res.staged && !pkWatching) $("#pk-go-box").hidden = true;
 }
-let pkChoices = [], pkChoicesOk = false, pkVersion = null, pkProbesChanged = null;   // file della sonda che cambiano con il pacchetto
+let pkChoices = [], pkVersion = null, pkProbesChanged = null;   // file della sonda che cambiano con il pacchetto
 const pkSel = new Set();
 function pkShowForm(version) {
   pkVersion = version;
@@ -19250,22 +17564,11 @@ $("#pk-file").onchange = async () => {
     if (!sf) throw new Error("seleziona insieme allo zip anche la sua firma (file .sig, fatto con «Firma NetMon»).");
     const sig = (await sf.text()).trim();
     if (!/^[A-Za-z0-9+/=]{20,1000}$/.test(sig)) throw new Error("il file .sig non è una firma di «Firma NetMon».");
-    const res = await pkUpload(f, CUR_VM, sig);
-    pkFile = f; pkSig = sig;
-    if (CUR_VM === CONTROL && VM_LIST.length > 1) await loadVmList();      // versioni attuali delle VM
-    renderPkChecks(res); pkRenderPlan(res);
-    if (pkPlan) {
-      // gateway: le sonde sono sulle VM, si scelgono tra quelle di tutte
-      try {
-        const all = await api("/api/admin/probes/all");
-        pkChoices = all.probes.map(p => ({ key: p.vm + "|" + p.key, name: `${p.name} · ${p.vm}`, version: p.version,
-                                            offline: p.state === "offline" }));
-        pkChoicesOk = true;
-      } catch { pkChoices = []; pkChoicesOk = false; }
-    }
-    const go = res.ok || !!(pkPlan && pkPlan.vms.length);
+    const res = await pkUpload(f, sig);
+    renderPkChecks(res);
+    const go = res.ok;
     ps.textContent = go ? "Controlla l'elenco qui sopra, poi conferma con la tua password."
-      : res.up_to_date ? "Hanno già tutte questa versione (o una più recente): non c'è niente da aggiornare." : "";
+      : res.up_to_date ? "Il server ha già questa versione (o una più recente): non c'è niente da aggiornare." : "";
     if (go) {
       // Le sonde dopo la VM: di proposito la scelta parte sempre da «Nessuna», anche quando il
       // pacchetto le cambia. Si aggiornano solo se l'amministratore lo sceglie; la nota lo avvisa.
@@ -19281,48 +17584,16 @@ $("#pk-file").onchange = async () => {
   } catch (e) { ps.className = "maint-status bad"; ps.textContent = "Caricamento non riuscito: " + e.message; }
   finally { $("#pk-file").value = ""; }
 };
-let pkFile = null, pkSig = "";             // il pacchetto caricato e la sua firma: servono anche per le altre VM
-async function pkUpload(f, vm, sig) {
+async function pkUpload(f, sig) {
   const headers = { "Content-Type": "application/zip", "X-Netmon-Signature": sig };
-  if (vm && vm !== CONTROL) headers["X-Netmon-VM"] = vm;
   const r = await fetch("/api/admin/package", { method: "POST", headers, body: f });
   const res = await r.json().catch(() => ({}));
   if (r.status === 401 && res.detail === "accesso richiesto") { showLogin("La sessione è scaduta: accedi di nuovo."); throw new Error(res.detail); }
   if (!r.ok) throw new Error(typeof res.detail === "string" ? res.detail : "HTTP " + r.status);
   return res;
 }
-// Stesso pacchetto sulle VM da aggiornare: caricato, controllato e programmato su ognuna
-async function pkOthers(vms, at, password, mode, keys, current, batch) {
-  const out = [];
-  const keysOf = vm => keys.filter(k => k.startsWith(vm + "|")).map(k => k.slice(vm.length + 1));
-  // «Tutte» su una VM senza sonde: si aggiorna solo la VM (le VM con una versione vecchia rifiuterebbero
-  // tutta l'installazione per «nessuna sonda»)
-  const senzaSonde = vm => pkChoicesOk && !pkChoices.some(p => p.key.startsWith(vm + "|"));
-  const probesFor = vm => mode === "all" ? (senzaSonde(vm) ? ["none", null] : ["all", null])
-    : mode === "some" && keysOf(vm).length ? ["some", keysOf(vm)] : ["none", null];
-  for (const vm of vms) {
-    try {
-      const rep = await pkUpload(pkFile, vm, pkSig);
-      if (!rep.ok) { out.push(`${vm}: pacchetto rifiutato (${(rep.errors || []).join("; ")})`); continue; }
-      const [pm, pk] = probesFor(vm);
-      const r = await api("/api/admin/package/schedule", { at, password, probes_mode: pm, probes: pk, batch }, vm);
-      out.push(`${vm}: ${at ? "programmata" : "avviata"}` + (r.probes_schedule ? ", poi le sonde" : "")
-               + (r.warning ? ` (${r.warning})` : mode === "all" && pm === "none" ? " (nessuna sonda: solo la VM)" : ""));
-    } catch (e) { out.push(`${vm}: ${e.message}`); }
-  }
-  // VM già aggiornate: le loro sonde si aggiornano lo stesso, se sono state scelte
-  for (const vm of current || []) {
-    const [pm, pk] = probesFor(vm);
-    if (pm === "none") continue;
-    try {
-      await api("/api/admin/schedules", { target: "probes", cmd: "update", at, password, probes: pk, batch }, vm);
-      out.push(`${vm}: sonde ${at ? "programmate" : "avviate"}`);
-    } catch (e) { if (!/Nessuna sonda/.test(e.message)) out.push(`${vm} (sonde): ${e.message}`); }
-  }
-  return out;
-}
 $("#pk-discard").onclick = async () => {
-  try { await vmApi("/api/admin/package/discard", {}); } catch {}
+  try { await api("/api/admin/package/discard", {}); } catch {}
   $("#pk-go-box").hidden = true; $("#pk-checks").hidden = true; $("#pk-status").textContent = "";
 };
 $("#pk-go").onclick = async () => {
@@ -19340,38 +17611,15 @@ $("#pk-go").onclick = async () => {
   const q = now
     ? `Installare adesso netmon ${pkVersion} sulla VM? ${probesText}`
     : `Programmare l'installazione di netmon ${pkVersion} sulla VM per il ${whenVm(at)}? ${probesText}`;
-  let plan = pkPlan && pkFile ? pkPlan : null;
-  if (plan) {
-    // solo le VM spuntate; quelle tolte non si toccano (neppure le loro sonde)
-    const off = plan.vms.filter(n => !plan.sel.has(n));
-    plan = { ...plan, here: plan.here && plan.sel.has(CONTROL), vms: plan.vms.filter(n => plan.sel.has(n)),
-             skip: [...plan.skip, ...off.map(n => `${n} esclusa`)] };
-    if (!plan.here && !plan.vms.length) return say("#pk-status", "Scegli almeno una VM da aggiornare.", true);
-  }
-  const where = plan ? [...plan.vms, ...(plan.here ? [CONTROL] : [])] : [];
-  if (!confirm(plan ? q.replace("sulla VM", "su " + where.join(", ")) : q)) return;
+  if (!confirm(q)) return;
   $("#pk-go").disabled = true;
   // una campagna: gli amministratori ricevono un solo riepilogo (alla programmazione, un'ora prima e
-  // con l'esito di tutto), non un'email per ogni VM e per ogni sonda
+  // con l'esito di tutto), non un'email per ogni sonda
   const batch = [...crypto.getRandomValues(new Uint8Array(8))].map(x => x.toString(16).padStart(2, "0")).join("");
   const announce = () => at ? api("/api/admin/schedules/batch/announce", { id: batch }).catch(() => {}) : null;
   try {
     await api("/api/admin/schedules/batch", { id: batch, at });
-    // prima le VM, poi il gateway: si riavvia, e la pagina con lui
-    const others = plan ? [...await pkOthers(plan.vms, at, password, mode, keys, plan.current, batch), ...plan.skip] : [];
-    if (others.length) $("#foot").textContent = "VM: " + others.join(" · ");
-    // il gateway si riavvia e la pagina si ricarica: l'esito sulle VM si rilegge dopo (pkLastVms)
-    if (others.length) try { sessionStorage.setItem("netmon.pk.vms", JSON.stringify({ at: Date.now(), text: others.join(" · ") })); } catch {}
-    if (plan && !plan.here) {
-      await announce();
-      $("#pk-pass").value = ""; $("#pk-go-box").hidden = true; $("#pk-checks").hidden = true;
-      const ps = $("#pk-status"); ps.className = "maint-status ok";
-      ps.textContent = "Il gateway ha già questa versione. VM: " + others.join(" · ") + ". Segui l'avanzamento in «Tutte le VM».";
-      return;
-    }
-    // con più VM le sonde scelte sono sulle VM (già programmate qui sopra), non sul gateway
-    const r = await vmApi("/api/admin/package/schedule", plan ? { at, password, probes_mode: "none", probes: null, batch }
-                                                            : { at, password, probes_mode: mode, probes: mode === "some" ? keys : null, batch });
+    const r = await api("/api/admin/package/schedule", { at, password, probes_mode: mode, probes: mode === "some" ? keys : null, batch });
     await announce();
     $("#pk-pass").value = ""; $("#pk-go-box").hidden = true; $("#pk-checks").hidden = true; pkSel.clear();
     const ps = $("#pk-status");
@@ -19399,7 +17647,7 @@ async function watchPackage() {
       const h = await vmHealth();
       if (h.version === pkWatching) { location.reload(); return; }
       if (currentPage === "vm") {
-        const res = await vmApi("/api/admin/vm");
+        const res = await api("/api/admin/vm");
         const su = res.selfupdate || {};
         if (su.state === "error") { pkWatching = null; renderVm(res); return; }
         // rollback non riuscito: il server è tornato alla versione nuova, inutile aspettare
@@ -19428,11 +17676,8 @@ function renderRollback(res) {
   const text = $("#rb-text");
   text.replaceChildren();
   rbHere = ok && pending;
-  rbHereInfo = pending ? { name: CUR_VM || CONTROL || "il server", ...rb } : null;
-  // l'elenco delle VM vale solo per la macchina mostrata adesso: lo rilegge rbLoadVms (dal gateway)
-  rbVms = []; rbVmInfo = []; rbSeq++;
   if (pending) {
-    rbDraw(text);
+    rbDraw(text, rb);
   } else if (rb.last && rb.last.state === "failed") {
     text.textContent = `Il rollback alla versione ${rb.last.from || "precedente"} non è riuscito `
       + `il ${whenVm(rb.last.at)}: è rimasta la ${rb.last.to || "versione nuova"}. Controlla il registro qui sopra.`;
@@ -19446,66 +17691,29 @@ function renderRollback(res) {
   acts.hidden = !rbHere;
   $("#rb-now").hidden = !rbHere;
   $("#rb-commit").disabled = $("#rb-now").disabled = false;
-  rbLoadVms(text, acts);
 }
-// Dal gateway la conferma vale anche per le VM: quelle con una finestra di rollback aperta
-let rbHere = false, rbVms = [], rbSeq = 0, rbHereInfo = null, rbVmInfo = [];
+let rbHere = false;
 // Quanto manca alla scadenza di una finestra di rollback
 function rbLeft(rb) {
   if (rb.scaduto) return "scaduta adesso";
   const min = Math.max(0, Math.round(((rb.deadline || 0) - Date.now() / 1000) / 60)), ore = Math.floor(min / 60);
   return ore > 0 ? `mancano ${ore} h ${min % 60} min` : `mancano ${Math.max(1, min % 60)} min`;
 }
-// Riquadro della versione da confermare: un punto per macchina (questa e, dal gateway, le VM),
-// ognuno con versione e scadenza; sotto, in breve, cosa fanno i due pulsanti
-function rbDraw(text) {
-  const list = [...(rbHereInfo ? [rbHereInfo] : []), ...rbVmInfo];
+// Riquadro della versione da confermare: versione e scadenza; sotto, in breve, cosa fanno i due pulsanti
+function rbDraw(text, rb) {
   text.replaceChildren();
-  if (!list.length) return;
-  text.append(el("p", "", list.length === 1 ? "Versione nuova da confermare su:" : `Versione nuova da confermare su ${list.length} macchine:`));
-  const ul = el("ul");
-  list.forEach(m => {
-    const li = el("li"), w = el("span", "when" + (m.scaduto ? " late" : ""), ` — fino alle ${rbUntil(m.deadline)} (${rbLeft(m)})`);
-    li.append(el("b", "", m.name), `: dalla ${m.from || "sconosciuta"} alla ${m.to || "nuova"}`, w);
-    ul.append(li);
-  });
-  text.append(ul);
-  const notes = ["Senza conferma, alla scadenza ognuna torna da sola alla versione precedente.",
-                 list.length > 1 ? "«Conferma la nuova versione» le conferma tutte." : "«Conferma la nuova versione» la tiene."];
-  if (rbHere) notes.push(`«Rollback subito» vale solo per ${rbHereInfo.name}.`);
-  text.append(el("p", "hint", notes.join(" ")));
-}
-async function rbLoadVms(text, acts) {
-  if (!(CUR_VM === CONTROL && VM_LIST.length > 1)) return;
-  const seq = rbSeq, found = [];
-  $("#rb-commit").disabled = true;                 // finché non so quali VM confermare
-  await Promise.all(VM_LIST.filter(n => n !== CONTROL).map(async n => {
-    try { const rb = (await api("/api/admin/vm", undefined, n)).rollback || {}; if (rb.pending) found.push({ name: n, ...rb }); } catch {}
-  }));
-  if (seq !== rbSeq || CUR_VM !== CONTROL) return;     // nel frattempo è stata scelta un'altra macchina
-  $("#rb-commit").disabled = false;
-  if (!found.length) return;
-  rbVmInfo = found.sort((a, b) => a.name.localeCompare(b.name));
-  rbVms = rbVmInfo.map(m => m.name);
-  rbDraw(text);
-  acts.hidden = false;
+  const p = el("p", "", `Versione nuova da confermare: dalla ${rb.from || "sconosciuta"} alla ${rb.to || "nuova"}`);
+  p.append(el("span", "when" + (rb.scaduto ? " late" : ""), ` — fino alle ${rbUntil(rb.deadline)} (${rbLeft(rb)})`));
+  text.append(p, el("p", "hint", "Senza conferma, alla scadenza il server torna da solo alla versione precedente. "
+    + "«Conferma la nuova versione» la tiene."));
 }
 $("#rb-commit").onclick = async () => {
-  const where = [...(rbHere ? [CUR_VM === CONTROL && VM_LIST.length > 1 ? CONTROL : "la VM"] : []), ...rbVms];
-  if (!confirm(`Confermare la versione nuova (${where.join(", ")})?\n\nIl rollback non sarà più possibile e la copia `
+  if (!confirm("Confermare la versione nuova?\n\nIl rollback non sarà più possibile e la copia "
       + "della versione precedente verrà tolta.")) return;
   say("#rb-msg", "");
-  const out = [];
   try {
-    if (rbHere) {
-      const r = await vmApi("/api/admin/vm/rollback/commit", {});
-      out.push(rbVms.length ? `${CONTROL}: confermata` : (r.message || "Confermato: la versione nuova resta."));
-    }
-    for (const vm of rbVms) {
-      try { await api("/api/admin/vm/rollback/commit", {}, vm); out.push(`${vm}: confermata`); }
-      catch (e) { out.push(`${vm}: ${e.message}`); }
-    }
-    say("#rb-msg", out.join(" · "), out.some(t => !/confermat/i.test(t)));
+    const r = await api("/api/admin/vm/rollback/commit", {});
+    say("#rb-msg", r.message || "Confermato: la versione nuova resta.");
     loadVm();
   } catch (e) { say("#rb-msg", e.message, true); }
 };
@@ -19514,7 +17722,7 @@ $("#rb-now").onclick = async () => {
       + "pagina di stato e avvisi non saranno disponibili.")) return;
   say("#rb-msg", "");
   try {
-    const r = await vmApi("/api/admin/vm/rollback", {});
+    const r = await api("/api/admin/vm/rollback", {});
     say("#rb-msg", r.message || "Rollback avviato.");
     pkWatching = pkRollTarget;             // aspetto che il server risponda con la versione vecchia
     pkRollStarted = Date.now();
@@ -19533,7 +17741,7 @@ $("#vm-sched").onclick = async () => {
   if (!confirm(domanda)) return;
   $("#vm-sched").disabled = true;
   try {
-    await vmApi("/api/admin/schedules", { target: "vm", cmd, at, password });
+    await api("/api/admin/schedules", { target: "vm", cmd, at, password });
     $("#vm-pass").value = "";
     const fatto = cmd === "reboot" ? "Riavvio programmato" : "Aggiornamento programmato";
     say("#vm-sched-msg", `${fatto} per il ${whenVm(at)}. Agli amministratori è arrivata un'email.`);
@@ -19607,7 +17815,6 @@ for _lang in i18n.LANGS:
 _STYLE_AT = STATUS_PAGE.index("<style>\n:root")          # il foglio di stile, non quello dei caratteri
 _STYLE = STATUS_PAGE[_STYLE_AT:STATUS_PAGE.index("</style>", _STYLE_AT) + len("</style>")]
 ADMIN_PAGE = (ADMIN_TEMPLATE.replace("<!--STILE-->", _STYLE).replace("<!--FONTS-->", _FONTS_TAG, 1)
-              .replace("/*__TOPO_JS__*/", TOPO_JS, 1)
               .replace("__NETMON_VERSION__", VERSION)
               .replace("__NETMON_LOGO__", _LOGO_INLINE).replace("</body>", _TOTOP, 1))
 ADMIN_ETAG = '"' + hashlib.sha256(ADMIN_PAGE.encode()).hexdigest()[:16] + '"'

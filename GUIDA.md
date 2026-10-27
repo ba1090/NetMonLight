@@ -1,6 +1,6 @@
-# netmon — guida completa da zero
+# NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261026-104239*
+*Versione di netmon: 1.1.20261027-161500*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -30,7 +30,6 @@ Telegram o ntfy quando qualcosa non risponde.
 8. Aggiornare i file in futuro
 9. Risoluzione problemi
 10. Riferimento rapido
-11. Più VM dietro un gateway
 
 ---
 
@@ -73,8 +72,7 @@ su disco, e i dati che cambiano di rado (modello, velocità della linea, nomi de
 elenco dei dispositivi) si leggono ogni 10 minuti. Il buffer delle misure si legge a blocchi.
 La pagina locale parte solo quando la apri e si chiude dopo 10 minuti di inattività. Nel
 registro compare una riga `OK` solo quando cambia qualcosa, e comunque una volta all'ora.
-- Il dominio **netmonhome.net**, con un record DNS per il server (o il gateway) e uno per ogni VM
-  (`vm1.netmonhome.net`, `vm2.…`).
+- Il dominio **netmonhome.net**, con un record DNS verso la VM del server.
 - Un account email per inviare gli alert (es. Gmail) e, consigliato, **Telegram** sul telefono.
 
 ## 2. Contenuto del pacchetto
@@ -186,9 +184,7 @@ Su Google Cloud l'installazione (anche `--aggiorna`) **toglie i pacchetti Google
 i metadati. Per tenerli tutti: `sudo NETMON_KEEP_GOOGLE=1 bash ~/netmon/server/installa-server.sh …`.
 
 **robots.txt e sitemap.xml** sono pubblici su ogni indirizzo (`https://dominio/sitemap.xml`). Elencano solo
-le pagine pubbliche: sul gateway la pagina d'accesso, l'informativa e la pagina di ogni VM collegata
-(`https://vmN.…/status`); su una VM la sua pagina di stato e l'informativa. Pannello e API sono esclusi.
-In Google Search Console (proprietà *Dominio*) basta inviare quella del gateway, in *Sitemap*.
+le pagine pubbliche: la pagina di stato e l'informativa. Pannello e API sono esclusi.
 
 ### A2. Configura il DNS di netmonhome.net
 
@@ -196,11 +192,10 @@ Nel pannello DNS del dominio crea un **record A** verso l'**IP esterno della VM*
 
 | Nome | Punta a |
 |---|---|
-| `netmonhome.net` | la VM del server, oppure il gateway se usi più VM |
-| `vm1.netmonhome.net`, `vm2.…` | ogni VM dietro il gateway (vedi *11. Più VM dietro un gateway*) |
+| `netmonhome.net` | la VM del server |
 
-Utenti e sonde usano l'indirizzo della loro VM: con una VM sola `netmonhome.net`, con il gateway
-`vmX.netmonhome.net` (lo trovano nell'email d'invito e in *Impostazioni → Sonde*). Il DNS può impiegare
+Utenti, amministratori e sonde usano tutti questo indirizzo (le sonde lo trovano anche in
+*Impostazioni → Sonde*). Il DNS può impiegare
 qualche minuto ad aggiornarsi: lo script di installazione controlla che il nome punti alla VM.
 
 ### A3. Installazione guidata
@@ -322,14 +317,11 @@ segnalali come "non spam" e aggiungi il mittente ai contatti.
 1. Attiva la verifica in due passaggi sull'account Google (myaccount.google.com/security).
 2. Crea una **password per le app** (myaccount.google.com/apppasswords): 16 lettere, da scrivere
    **senza spazi**. Se cambi la password dell'account Google, quelle per le app vengono revocate.
-3. Nel pannello del gateway, **Server › Invio email**: server `smtp.gmail.com`, porta 587, utente e
-   mittente l'indirizzo Gmail, la password per le app, la tua password di amministratore → **Salva e
-   manda a tutte le VM**. La configurazione passa da sola a tutte le VM collegate e a quelle che
-   collegherai dopo; non serve toccare il `.env` di nessuna macchina. La password viaggia dal gateway
-   alle VM sulla rete privata, come le altre richieste del pannello, e sta nel database degli account
+3. Nel pannello, **Server › Invio email**: server `smtp.gmail.com`, porta 587, utente e
+   mittente l'indirizzo Gmail, la password per le app, la tua password di amministratore → **Salva**.
+   Non serve toccare il `.env`: la configurazione sta nel database degli account
    (`auth.db`, leggibile solo dal servizio).
-4. **Invia email di prova** (stessa pagina) la fa partire dal gateway e da ogni VM: per ognuna dice
-   *inviata* oppure il motivo, per esempio *utente o password non accettati (535 …)* = password
+4. **Invia email di prova** (stessa pagina): dice *inviata* oppure il motivo, per esempio *utente o password non accettati (535 …)* = password
    sbagliata o non per le app; *server di posta non raggiungibile* = server o porta sbagliati, o porta
    bloccata dal fornitore della VM (prova la 465).
 
@@ -718,7 +710,7 @@ mentre scorri, con ☰ e il titolo della sezione. Su telefono, quando scendi lun
 compare in basso a destra il tasto tondo **⌃ Torna su**, che riporta all'inizio.
 
 Nel **pannello di amministrazione** il menu è ad albero: sotto ogni scheda (*Amministrazione*, *Sonde*,
-*Server*) ci sono, rientrate, le sue sezioni (per esempio *Server* → *Tutte le VM* (solo con più VM), *Stato VM*, *Manutenzione della VM*,
+*Server*) ci sono, rientrate, le sue sezioni (per esempio *Server* → *Stato VM*, *Manutenzione della VM*,
 *Aggiornamento Netmon*, *Registro amministrativo*; in *Sonde* → *Conservazione dei dati*). La pagina
 mostra **una sezione alla volta**, sempre aperta; in alto c'è il percorso (*Server › Manutenzione della VM*).
 Toccando il nome di una scheda si torna all'ultima sua sezione che avevi aperto; aprendo `/admin` senza nulla in fondo si parte invece sempre da *Utenti*. L'indirizzo porta la
@@ -1196,7 +1188,7 @@ In cima al riquadro **Ultimi eventi** c'è il **filtro**: scrivi un testo qualsi
 nome di un dispositivo; maiuscole e minuscole non contano) oppure tocca uno o più **tag**, cioè le
 parole tra parentesi quadre all'inizio degli eventi, come *CRITICO*, *ALERT*, *OK*, *MANUTENZIONE*.
 Accanto a ogni tag c'è quanti eventi lo hanno. Testo e tag si possono usare insieme (per esempio
-*ALERT* + «gateway»); con più tag compaiono gli eventi che ne hanno uno qualsiasi. Il filtro vale su
+*ALERT* + «router»); con più tag compaiono gli eventi che ne hanno uno qualsiasi. Il filtro vale su
 tutti gli eventi, non solo su quelli della pagina, e accanto al titolo compare per esempio
 "8 di 57 eventi". **Azzera filtro** torna all'elenco completo.
 
@@ -1317,7 +1309,7 @@ Cosa fa e cosa no:
 Un controllo alla volta per sonda; tra due controlli dello stesso dispositivo dalla pagina serve almeno un
 minuto. Serve una sonda aggiornata a questa versione: con una sonda vecchia lo scudo non compare.
 Risultati e scelte «ogni giorno» stanno sul server in `data/scans.json` (solo l'ultimo controllo di ogni
-dispositivo); spostando l'utente su un'altra VM non vengono portati con sé, basta riattivarli.
+dispositivo); esportando l'utente verso un altro server non vengono portati con sé, basta riattivarli.
 
 ## Scheda Stato sonda
 
@@ -1438,8 +1430,7 @@ password provvisoria, blocco azzerato).
 Nella pagina `/admin`:
 
 - **Utenti**: tutti gli account della pagina di stato — **tutti uguali**: ognuno vede e riceve solo gli
-  avvisi delle sue sonde, più l'avviso quando il server va in manutenzione —, con la **VM** (solo con
-  più VM), lo stato (*attivo ora*, *sessione aperta*, *non collegato*, *bloccato*; gli invitati non ancora
+  avvisi delle sue sonde, più l'avviso quando il server va in manutenzione —, con lo stato (*attivo ora*, *sessione aperta*, *non collegato*, *bloccato*; gli invitati non ancora
   registrati compaiono come *invitato*), il **Piano**, la **Scadenza**, registrazione e ultima attività
   (la data; l'ora passando sopra), sessioni aperte, **Sonde** (collegate / consentite), **FRITZ!Box**
   (collegati a tutte le sue sonde / massimo per l'account) e **Dispositivi** (configurati su tutte le sue
@@ -1475,8 +1466,9 @@ Nella pagina `/admin`:
   da chi è stato eliminato, quante sonde ha lasciato e **quando i dati vengono cancellati da soli**
   (30 giorni dopo). **Elimina i dati** (con la tua password) li cancella subito. Le sonde che nel
   frattempo qualcuno ha ricollegato al suo account con il token restano a lui. Le sonde senza
-  proprietario non passano più al primo account che si registra sulla VM.
-  - **Esporta (file cifrato)** e, con più VM, **Sposta su un'altra VM**: vedi la sezione 11.
+  proprietario non passano più al primo account che si registra sul server.
+  - **Esporta (file cifrato)**: l'utente con sonde e storico in un file cifrato, da importare su un altro
+    server netmon con **⤒ Importa un utente** (sopra la tabella). Si apre solo con la password del file.
 - **Codici di accesso** (o **＋ Aggiungi utente** nella tabella Utenti): per ospitare qualcuno generi un codice (`accesso_…`). Se indichi la sua
   **email**, il server gliela manda in automatico con un link che apre la registrazione già
   compilata (codice ed email inseriti: sceglie solo la password); il codice vale **solo per
@@ -1500,8 +1492,7 @@ Nella pagina `/admin`:
   per chi l'ha persa. Qui c'è solo quello che riguarda **gli altri**.
 - **Il tuo account**: quello che riguarda **te** e basta — il tuo nome, la tua **lingua** (italiano,
   inglese, tedesco o francese: pannello e avvisi che ricevi via email e Telegram) e il tuo **fuso
-  orario** (gli orari del pannello, anche quelli che arrivano dalle VM; *Default* usa quello del
-  gateway), la tua password, la tua app di autenticazione e la tua chat Telegram. Prima dell'accesso il
+  orario** (gli orari del pannello; *Default* usa quello del server), la tua password, la tua app di autenticazione e la tua chat Telegram. Prima dell'accesso il
   pannello usa la lingua scelta l'ultima volta su quel browser, oppure quella del browser.
 
 La chiave del server **non si rigenera dalla pagina**: si cambia solo sulla VM, nel `.env` (vedi
@@ -1570,12 +1561,6 @@ nessun errore nei programmi. Se è idoneo scegli, poi conferma con la tua passwo
   Parte sempre da *Nessuna*: le sonde si aggiornano solo se lo scegli. Se il pacchetto cambia anche
   le sonde, sotto compare una nota che lo dice.
 
-Con più VM, scegliendo in alto il **gateway** l'elenco dei controlli finisce con le **VM collegate**:
-ogni VM con una versione più vecchia, e il gateway stesso, ha una casella già spuntata. Togli la spunta
-a quelle che non vuoi aggiornare adesso (per esempio per provare la nuova versione prima su una sola
-VM); le VM già aggiornate o che non rispondono sono solo segnalate. Cambiando macchina nella barra sotto
-l'intestazione resti nella stessa sezione.
-
 **Le sonde vanno aggiornate?** Ogni rilascio cambia il numero di versione di tutti i file, anche quando i
 programmi della sonda restano gli stessi. Per questo il server confronta i file della sonda del nuovo pacchetto
 con quelli che distribuiva finora, senza contare il numero di versione, e te lo dice:
@@ -1603,10 +1588,8 @@ completo firmato dalla VM; se la VM non si aggiorna, l'aggiornamento delle sonde
 > sola** alla versione precedente; se la VM viene riavviata durante le 4 ore, il conto alla
 > rovescia riprende all'avvio (e se è già scaduto il ripristino parte subito). Se la versione
 > precedente non riparte, vengono rimessi i file della versione nuova e il riquadro segnala che il
-> rollback non è riuscito. Il riquadro elenca a punti le macchine con la versione nuova da confermare,
-> una per riga con versione precedente e nuova, ora di scadenza e tempo rimasto (in rosso se già scaduta).
-> Con più VM, dal gateway scelto in alto l'elenco comprende anche le VM: **Conferma la nuova versione** conferma gateway e VM insieme
-> (*Rollback subito* invece vale solo per la macchina scelta). Un aggiornamento fatto a mano con `installa-server.sh --aggiorna`
+> rollback non è riuscito. Il riquadro mostra versione precedente e nuova, ora di scadenza e tempo
+> rimasto (in rosso se già scaduta). Un aggiornamento fatto a mano con `installa-server.sh --aggiorna`
 > chiude la finestra aperta (vale come conferma). Il database (account, eventi, misure)
 > **resta della versione nuova**: il ripristino rimette solo i file, e le versioni recenti
 > aggiungono solo colonne al database, quindi quella vecchia ci gira sopra. Un nuovo aggiornamento
@@ -1617,11 +1600,11 @@ Le programmazioni compaiono nella tabella sotto *Programma una manutenzione dell
 partono (annullando la VM si annullano anche le sonde). Avvisi: amministratori via email, proprietari delle sonde
 sui loro canali, subito e un'ora prima; con *Adesso* nessun avviso, solo il registro eventi. Un pacchetto caricato e non programmato vale un'ora; *Annulla* lo scarta.
 
-**Un solo riepilogo agli amministratori.** Un aggiornamento lanciato dal pannello (pacchetto su una o più VM con le
-loro sonde, oppure *Aggiorna tutte le sonde*) è una sola campagna: le VM non mandano più un'email per ogni
-programmazione, per l'esito della singola VM o per ogni sonda non riuscita. Agli amministratori arrivano al massimo
-tre email, ognuna con l'elenco per VM di tutto quello che riguarda l'aggiornamento: **alla programmazione** (cosa
-verrà aggiornato, versione, VM e sonde: tutte o quelle scelte), **un'ora prima** (se programmato con più di un'ora
+**Un solo riepilogo agli amministratori.** Un aggiornamento lanciato dal pannello (pacchetto sul server con le
+sue sonde, oppure *Aggiorna tutte le sonde*) è una sola campagna: il server non manda un'email per ogni
+programmazione o per ogni sonda non riuscita. Agli amministratori arrivano al massimo
+tre email, ognuna con l'elenco di tutto quello che riguarda l'aggiornamento: **alla programmazione** (cosa
+verrà aggiornato, versione e sonde: tutte o quelle scelte), **un'ora prima** (se programmato con più di un'ora
 di anticipo) ed **esito finale**, quando VM e sonde hanno finito, oppure dopo 4 ore al massimo. L'esito dice per ogni
 VM com'è andata e, per le sonde, quante sono aggiornate, quali non sono riuscite (con l'email del proprietario) e
 quali sono ancora in attesa perché spente o non collegate. Il titolo è *[OK] … completato* oppure *[ALERT] … N
@@ -1655,9 +1638,6 @@ privata, prima di ogni altro controllo; quella mostrata nel pannello serve solo 
 - **Passaggio alla 1.1**: la prima installazione della 1.1 dal pannello di una 1.0 non è ancora verificata
   (la fa lo script della 1.0). Conferma la nuova versione nella finestra di rollback appena hai controllato
   che funziona: un rollback rimetterebbe lo script della 1.0, senza la verifica della firma.
-
-Con più VM la firma vale per tutte: il pannello del gateway manda lo stesso zip con la stessa firma a ogni VM,
-e ognuna la verifica con la sua chiave installata. Tieni la stessa chiave su tutte.
 
 La **prima volta** la funzione va installata a mano (`installa-server.sh --aggiorna`): installa lo script di
 sistema, il verificatore e il permesso relativo. Da lì in poi si aggiorna tutto dalla pagina.
@@ -1797,7 +1777,7 @@ Con *Basso*, *Medio* e *Alto* i tre campi sono bloccati sui valori del piano. **
 il piano Basso** (si cambia con `NEW_USER_PLAN` nel `.env`: `medio`, `alto`, oppure vuoto per nessun piano);
 gli account che c'erano già restano come sono. Abbassando il numero di sonde, quelle già collegate oltre il
 limite continuano a funzionare: semplicemente non se ne possono aggiungere altre. Il piano ha la sua colonna
-(*Piano*) nella tabella *Utenti*, come la *Scadenza* e, con più VM, la *VM* dell'account. Gli account con
+(*Piano*) nella tabella *Utenti*, come la *Scadenza*. Gli account con
 numeri scelti prima dei piani risultano *Personalizzato*.
 
 **Scadenza dell'account.** Dal menu **Azioni ▾** di un utente, **Scadenza…**: *Attiva la scadenza
@@ -2033,8 +2013,8 @@ Se dai account ad altre persone, sei il titolare del trattamento dei loro dati. 
   Il link *Informativa sulla privacy* sta sempre in fondo a ogni pagina (pagina di stato, pannello `/admin` e le
   loro schermate di accesso, pagina locale della sonda, che apre l'informativa del suo server), in piccolo.
   È in italiano, inglese, tedesco e francese (fa fede l'italiano), con un selettore della lingua in alto: si apre
-  nella lingua dell'account o del browser, oppure in quella della sonda. Contiene: titolare indicato come gestore del servizio, senza nome (info.netmonitor@gmail.com), gateway e server degli
-  utenti (i dati delle sonde solo sul server dell'account), controlli di sicurezza, server su
+  nella lingua dell'account o del browser, oppure in quella della sonda. Contiene: titolare indicato come gestore del servizio, senza nome (info.netmonitor@gmail.com), un solo
+  server con account, sonde e storico, controlli di sicurezza, server su
   Google Cloud nell'UE, email con Brevo (UE), nessuna copia di sicurezza, **fase di prova** fino a nuova
   comunicazione con cancellazione dei dati entro 30 giorni dalla fine. La durata dello storico la scrive il server al
   posto di `__NETMON_CONSERVAZIONE_IT__` (e `_EN`, `_DE`, `_FR`), quindi resta giusta anche se cambi *Conservazione dei dati*; se cambi le
@@ -2051,7 +2031,7 @@ italiana del rilascio). La numerazione è ripartita da `1.0` il 12 ottobre 2026 
 dal 14 ottobre 2026 è `1.1`, con la firma dell'autore sui pacchetti. Per sapere se è tutto allineato:
 
 - **Server**: in fondo alla pagina di stato e alla pagina `/admin` (`netmon 2.0.…`), oppure
-  aprendo `https://netmonhome.net/health`. Con più VM, *Server › Tutte le VM* mostra la versione di ognuna.
+  aprendo `https://netmonhome.net/health`.
 - **Sonde**: *Stato sonda* → *Sonda netmon* → *Versione*. Se è diversa da quella del server
   compare in giallo con la scritta *aggiorna la sonda*. Anche la pagina locale della sonda la
   mostra, nella sezione *Sistema* e in fondo alla pagina.
@@ -2092,9 +2072,7 @@ Nel pannello carichi i due file insieme. Lo script avvisa se nel repository
 manca `server/release-key.pub` (la chiave pubblica che la VM usa per verificare la firma).
 
 **Dal pannello (normale).** Si aggiorna tutto dal browser: `/admin` → *Server ›
-Aggiornamento Netmon* per la VM (con più VM, scegliendo in alto il gateway il pacchetto va anche a
-tutte le VM con una versione più vecchia, il gateway per ultimo; le VM già aggiornate sono segnalate e
-non vengono toccate, e togliendo la spunta puoi escludere una VM o il gateway) (vedi *Aggiornamento Netmon (VM)*, con la finestra di rollback di 4
+Aggiornamento Netmon* per la VM (vedi *Aggiornamento Netmon (VM)*, con la finestra di rollback di 4
 ore), poi le sonde con *Aggiorna netmon* (vedi *Riavvio e aggiornamento*).
 
 **Con gli script, sulla VM e sulla sonda.** Servono la prima volta (per installare script e
@@ -2146,6 +2124,46 @@ le reti Wi-Fi salvate (`nmcli connection show`; toglierle farebbe perdere la ret
 `/var/log/netmon-installazione.log` e la cartella `~/probe`, che puoi cancellare a mano. Se è in
 corso un aggiornamento o un cambio di rete Wi-Fi della sonda, lo script si ferma e chiede di riprovare.
 
+### Esportare e importare un utente
+
+*Utenti → Azioni ▾ → Esporta (file cifrato)* scarica un file `.netmon` con l'utente, le sue sonde e tutto lo
+storico, **cifrato con una password che scegli tu** (almeno 12 caratteri; *Genera* propone sei parole a caso,
+facili da dettare). Senza quella password il file non si apre e non si legge nulla, nemmeno l'email: non la
+salvano né il server né il file, quindi comunicala a chi importa per un canale diverso da quello del file.
+Cifratura: AES-256-GCM a blocchi, con la chiave ricavata dalla password con scrypt; un file modificato o
+troncato viene rifiutato.
+
+*Utenti → ⤒ Importa un utente* lo carica con la sua password (sbagliandola si riprova senza ricaricare il
+file); anche gli zip in chiaro delle versioni precedenti si importano ancora, con un avviso. L'utente entra
+con la stessa password e le sonde continuano con il loro token; restano in pausa per un'ora, il tempo di
+puntarle al nuovo indirizzo (`sudo bash ~/netmon/probe/installa-sonda.sh`, opzione **2) Riconfigurare**,
+oppure il vecchio nome DNS verso questa VM con `OLD_HOSTS`, vedi *Cambiare dominio*). Serve per portare un
+utente da un altro server netmon (anche da una VM di un'installazione NetMon con gateway) o come copia di
+sicurezza.
+
+Se **l'account esiste già**, *Importa un utente* porta **solo lo storico** (misure, eventi, traffico,
+speedtest, FRITZ!Box): account, sonde, token e impostazioni restano quelli del server. Per ogni sonda del
+backup scegli su quale sonda dell'account va il suo storico (proposta: stessa sonda o stesso nome;
+*Non importare* per saltarla), poi **Unisci** (aggiunge ciò che manca, ripeterlo non crea doppioni) oppure
+**Sovrascrivi** (nel periodo coperto dal backup valgono i dati del backup).
+
+### Cambiare dominio
+
+Per esempio da `netmon-public.com` a `netmonhome.net`. Le sonde stanno a casa degli utenti e hanno in
+`config.yaml` l'indirizzo del server: il vecchio nome resta attivo e le rimanda al nuovo, così passano da sole.
+
+1. Nel DNS del nuovo dominio crea il record A verso la VM. **Non togliere** quello vecchio.
+2. Sulla VM: `sudo bash ~/netmon/server/installa-server.sh`, scelta **2) Riconfigurare**, e scrivi il nuovo dominio.
+
+L'installatore scrive i nomi precedenti in `OLD_HOSTS` nel `.env` e li lascia nel Caddyfile accanto a quello
+nuovo, con il loro certificato. Chi arriva a un vecchio nome è rimandato al nuovo indirizzo: i browser con un
+reindirizzamento permanente (gli utenti rientrano una volta, perché la sessione vale per il nome), le sonde con
+una risposta «spostata» (410 con il nuovo indirizzo), e scrivono il nuovo indirizzo in `config.yaml` da sole.
+Vale per le sonde con i programmi dal 13 ottobre 2026 (pomeriggio) in poi; le più vecchie si aggiornano prima,
+oppure si cambia l'indirizzo a mano (`installa-sonda.sh`, **2) Riconfigurare**). Il record DNS vecchio si
+toglie quando in *Sonde › Elenco sonde* tutte le sonde scrivono di nuovo: allora cancella la riga `OLD_HOSTS=`
+dal `.env` e rilancia lo stesso comando del passo 2.
+
 ## 9. Risoluzione problemi
 
 | Sintomo | Causa e soluzione |
@@ -2159,7 +2177,6 @@ corso un aggiornamento o un cambio di rete Wi-Fi della sonda, lo script si ferma
 | *Aggiornamento Netmon*: *Manca la firma dell'autore* | Hai selezionato solo lo zip: seleziona insieme lo zip e il suo `.sig` (tieni premuto ⌘ sul Mac). Il `.sig` lo crea *Firma NetMon* accanto allo zip. |
 | *Aggiornamento Netmon*: *Firma dell'autore NON valida* | Lo zip è stato modificato dopo la firma (riscaricalo e rifirmalo), oppure è firmato con una chiave diversa da quella della VM: l'impronta nel messaggio è quella della VM, confrontala con quella di *Firma NetMon*. Firmi da più computer (Mac e Windows)? Devono avere la stessa chiave: sul computer giusto *Salva una copia di riserva*, sull'altro *Usa la chiave di un altro computer* (vedi `tools/windows/LEGGIMI.md`, *Firmare da più computer*). |
 | *La VM non ha ancora la chiave di rilascio e il pacchetto non la contiene* | Firma lo zip con la versione aggiornata di *Firma NetMon* (quella dentro lo zip stesso, in `netmon/tools/mac`): aggiunge la tua chiave pubblica al pacchetto e poi lo firma. Ricarica lo zip con il **nuovo** `.sig`. Oppure aggiorna a mano via SSH con `installa-server.sh --aggiorna`. |
-| *Spostamento*: *La VM di arrivo non ha un indirizzo https://* | La VM di arrivo è collegata senza indirizzo pubblico `https://`: rilancia su quella VM `installa-server.sh` (collegamento al gateway) con il suo dominio. |
 | Caddy non parte o `reload` fallisce | `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`. Errore tipico: manca lo spazio prima della `{` (vedi A4). |
 | Caddy: *Timeout during connect (likely firewall problem)* | Porte 80/443 chiuse nel pannello del provider (passo A1) o nel firewall della VM: `sudo ufw status`, poi `sudo ufw allow 80,443/tcp`. |
 | Il sito va in timeout dal browser | Come sopra. Prova anche da rete mobile per escludere la rete dell'ufficio. |
@@ -2169,7 +2186,7 @@ corso un aggiornamento o un cambio di rete Wi-Fi della sonda, lo script si ferma
 | IP e RTT mostrano "—" | Sulla sonda gira una versione vecchia di `probe.py`, o una copia lanciata a mano. Controlla con `ps aux \| grep [p]robe.py`, chiudi le copie manuali e riavvia il servizio (`sudo systemctl restart netmon-probe`). |
 | Un dispositivo resta *modifiche in attesa* | La sonda non ha ancora ricevuto la configurazione: controlla che sia online. Se l'account ha raggiunto il limite di dispositivi, quelli oltre il limite non vengono controllati (vedi *Limiti per utente*). |
 | *Aggiorna netmon* dice *Funzione non ancora installata* o *Permesso mancante* | Sulla sonda: `sudo bash ~/probe/installa-sonda.sh --aggiorna`, una volta. |
-| Nessuna notifica | Gli avvisi delle sonde partono dalla **VM dell'utente**, non dal gateway: lì lancia `sudo journalctl -u netmon-server --since "-1 day" | grep -E "ALERT|Avviso|Invio"`. Per ogni avviso trovi *Avviso «…» inviato via email/telegram*, oppure il motivo per cui non è partito (*nessun canale attivo per questo tipo*, *Invio telegram fallito: …*). Gli avvisi degli amministratori compaiono nel registro del gateway come *Avviso amministrativo «…» inviato*. Per l'email, l'utente deve averla **confermata** (Impostazioni → Notifiche). Gli avvisi di aggiornamento arrivano solo per gli aggiornamenti **programmati**. |
+| Nessuna notifica | Sulla VM lancia `sudo journalctl -u netmon-server --since "-1 day" | grep -E "ALERT|Avviso|Invio"`. Per ogni avviso trovi *Avviso «…» inviato via email/telegram*, oppure il motivo per cui non è partito (*nessun canale attivo per questo tipo*, *Invio telegram fallito: …*). Gli avvisi degli amministratori compaiono nel registro come *Avviso amministrativo «…» inviato*. Per l'email, l'utente deve averla **confermata** (Impostazioni → Notifiche). Gli avvisi di aggiornamento arrivano solo per gli aggiornamenti **programmati**. |
 
 **Sonde vecchie senza account.** Una sonda rimasta senza proprietario (per esempio dopo
 l'eliminazione di un account che ha lasciato le sue sonde sul server) non la vede nessuno e non manda
@@ -2245,139 +2262,3 @@ journalctl -u netmon-config -f          # sonda
 | Controllo salute del server | `https://<dominio>/health` |
 | Pagina locale della sonda | `http://<ip-sonda>:8080` (solo LAN) |
 | Riepiloghi delle installazioni | VM: `/root/netmon-server-riepilogo.txt`; sonda: `/root/netmon-sonda-riepilogo.txt` |
-
----
-
-## 11. Più VM dietro un gateway
-
-Con molti utenti netmon si divide su più VM: un **gateway** (`netmonhome.net`) fa da pannello di
-amministrazione e da pagina d'accesso, e ogni utente, con le sue sonde e i suoi dati, vive su una **VM
-probe** con il suo indirizzo (`vm1.netmonhome.net`, `vm2.…`). Sonde e utenti parlano direttamente
-con la loro VM; il gateway non fa passare il traffico. Architettura e installazione passo passo sono in
-`gateway/LEGGIMI.md` e in `INSTALLAZIONE.md` (Caso 4).
-
-**Come una VM sa chi è.** Il nome (`vm1`, `vm2`, …) lo decide il pannello: in *Server › Tutte le VM ›
-Collega una VM* scrivi il nome e generi un token (24 ore, una volta sola). Sulla VM
-`installa-server.sh --dietro-gateway` chiede quel token, il gateway risponde con nome e chiave della
-VM e l'installatore li scrive nel `.env` (`VM_ID`, `GATEWAY_SECRET`). Gli aggiornamenti li conservano.
-
-**Accesso degli utenti.** `https://netmonhome.net` (con logo e nome *NetMon Home tool*, come le
-altre pagine) chiede l'email (o il codice di accesso, per chi si registra) e porta l'utente alla
-pagina della sua VM con l'email già inserita. A ogni accesso il gateway chiede alle VM dove vive
-l'account, quindi un utente appena spostato (o eliminato e reimportato da backup su un'altra VM) arriva subito alla VM giusta.
-L'email di un **amministratore** che non è anche un utente porta al **pannello di amministrazione**
-(`/admin` del gateway, con l'email già inserita); se la stessa email è anche un utente di una VM, vince
-l'utente e si va alla sua VM (il pannello resta su `https://netmonhome.net/admin`).
-Anche chi entra direttamente dall'indirizzo di una VM sbagliata (per esempio `vm1.…` con un account
-che sta su vm2) viene portato da solo alla VM giusta, con l'email già scritta: la VM chiede
-all'orchestratore dove vive l'account. Icone e informativa della
-pagina il gateway le serve da sé, senza rimandare a una VM. Le email d'invito
-portano direttamente alla VM giusta, con email e codice già compilati.
-
-**Nel pannello del gateway:**
-
-- *Amministrazione* (utenti, codici, amministratori) vale per tutte le VM: ogni utente mostra la sua
-  VM, e creando un utente o un codice si sceglie la VM.
-- *Server › Tutte le VM*: in alto la **mappa dei collegamenti**, con il gateway al centro e le VM intorno.
-  - Ogni VM ha nome, indirizzo privato, dominio pubblico, versione e sonde collegate.
-  - Sui collegamenti si muovono piano dei pallini, nei due versi (più lenti se la latenza è alta); il tempo
-    di risposta è scritto a metà linea. Schede e linee sono ferme.
-  - Colori: **verde** collegata; **giallo** lenta (oltre 150 ms) o da riavviare; **rosso tratteggiato** con
-    una croce se non risponde.
-  - Toccando una VM la apri nella sua *Manutenzione*.
-  - Sul telefono le VM sono una sotto l'altra, ognuna con un ramo da una linea comune.
-  - Con *Riduci movimento* attivo nel sistema anche i pallini restano fermi.
-  - La riga *Mappa dei collegamenti* chiude e riapre solo la mappa (la tabella resta); il browser ricorda
-    la scelta.
-- **Su quale macchina stai lavorando.** Nelle sezioni che valgono per una sola macchina (*Stato VM*,
-  *Manutenzione della VM*, *Aggiornamento Netmon*, *Registro amministrativo*, le sezioni delle sonde
-  tranne l'elenco):
-  - sotto l'intestazione c'è la **barra delle macchine**: gateway e VM, ognuna con il pallino dello stato;
-    un tocco per cambiare macchina, restando nella stessa sezione;
-  - la macchina attiva è piena: **blu** il gateway, **verde acqua** una VM;
-  - una frase sotto la barra dice su quale macchina agiscono i pulsanti della pagina;
-  - lo stesso colore compare sul nome nel titolo e come filo in cima a ogni riquadro.
-
-  Aprendo il pannello si parte sempre dal **gateway**; la macchina scelta resta finché tieni aperta quella
-  scheda del browser (anche ricaricando la pagina), una scheda nuova riparte dal gateway.
-
-  Sotto, una riga per macchina (stato, versione, utenti, sonde, CPU, memoria, disco, dati),
-  **Collega una VM** e **Togli** (solo per una VM senza utenti né sonde).
-- *Sonde › Elenco sonde* mostra le sonde di **tutte le VM**, con la colonna **VM** (se una VM non
-  risponde, il conteggio in alto lo dice). *Programma un aggiornamento* vale per le sonde scelte o per
-  tutte, su qualunque VM: il pannello lo programma su ogni VM che ha sonde, e il registro sotto mostra
-  ogni riga con la sua VM (con *Annulla* finché non è partito).
-- *Aggiornamento Netmon* sul gateway: in *Dopo, aggiorna le sonde* l'elenco di *Quelle che scelgo* ha
-  le sonde di tutte le VM. Ogni VM aggiorna le sue dopo essersi aggiornata; su una VM che ha già la
-  versione nuova le sonde scelte si aggiornano subito (o all'ora scelta).
-- Le altre sezioni di *Sonde* e *Server* (*Conservazione dei dati*, *Stato VM*, *Manutenzione*…)
-  mostrano una macchina alla volta, quella scelta nel menu **VM** in alto. In *Amministrazione*, in
-  *Elenco sonde* e in *Tutte le VM* il menu non compare, perché valgono per tutte.
-- *Utenti → Esporta (file cifrato)* scarica un file `.netmon` con l'utente, le sue sonde e tutto lo storico,
-  **cifrato con una password che scegli tu** (almeno 12 caratteri; *Genera* propone sei parole a caso,
-  facili da dettare). Senza quella password il file non si apre e non si legge nulla, nemmeno l'email:
-  non la salvano né il server né il file, quindi comunicala a chi importa per un canale diverso da quello
-  del file. Cifratura: AES-256-GCM a blocchi, con la chiave ricavata dalla password con scrypt; un file
-  modificato o troncato viene rifiutato. *Importa un utente* lo carica su una VM a scelta con la sua
-  password (sbagliandola si riprova senza ricaricare il file); anche gli zip in chiaro delle versioni
-  precedenti si importano ancora, con un avviso. L'utente entra con la stessa password e le sonde
-  continuano a funzionare; restano in pausa per un'ora, il tempo di spostarle sul nuovo indirizzo. Serve
-  per portare un utente da un vecchio server 2.x (che ha lo stesso pulsante dalla 2.1) o come copia di
-  sicurezza. Il file protegge i dati mentre viaggiano o restano parcheggiati; sui server i dati restano
-  leggibili da chi li amministra, perché il server deve usarli per grafici e avvisi.
-- *Utenti → Azioni ▾ → Sposta su un'altra VM* sposta l'utente in un passo solo, con sonde e tutto lo
-  storico. Scelta la VM di arrivo, il pannello mostra quante sonde e misure ha l'utente, quanto pesa lo
-  storico e se c'è posto (il file che passa per il gateway è cifrato con una password casuale che nessuno
-  vede): sulla VM di arrivo servono circa **tre volte lo storico** (file, database
-  estratto e righe nuove) più una riserva (il 5 % del disco, almeno 300 MB); se non bastano, **Sposta**
-  resta disattivato e il messaggio dice quanto manca. Lo spazio si ricontrolla con la misura vera
-  appena lo zip è pronto. Durante lo spostamento le sonde tengono da parte le misure (la VM di partenza
-  risponde «riprova») e le mandano dopo, quindi non si perde nulla. Alla fine l'utente è tolto dalla VM
-  di partenza, che ricorda dove è andato:
-  - le **sonde** con i programmi dal 13 ottobre 2026 (pomeriggio) in poi ricevono il nuovo indirizzo alla prima chiamata e lo
-    scrivono da sole in `config.yaml`; il token resta lo stesso. Le sonde con programmi più vecchi sono
-    elencate nel controllo: aggiornale prima, oppure dopo lo spostamento cambia l'indirizzo del server a
-    mano (`sudo bash ~/netmon/probe/installa-sonda.sh`, opzione **2) Riconfigurare**). Le sonde puntate
-    al gateway non devono fare nulla: il gateway le manda già alla VM nuova. Il nuovo indirizzo
-    dev'essere `https://`: le sonde ci mandano il loro token, e dalla 1.1 rifiutano un indirizzo `http://`
-    fuori dalla rete di casa. Per questo lo spostamento parte solo verso una VM con un indirizzo pubblico
-    `https://` (lo scrive `installa-server.sh`), e una VM si collega al gateway solo con un indirizzo `https://`;
-  - l'**utente** che entra dalla pagina del gateway arriva alla VM nuova; se apre ancora l'indirizzo
-    della VM vecchia, al login viene portato sulla nuova con l'email già scritta. Password e
-    impostazioni sono le stesse;
-  - gli inviti non ancora usati per quell'email sulla VM di partenza vengono cancellati.
-- Se sulla VM scelta **l'account esiste già** (per esempio storico fino a ieri sul vecchio server e
-  da oggi sulla nuova VM), *Importa un utente* porta **solo lo storico** (misure, eventi, traffico,
-  speedtest, FRITZ!Box): account, sonde, token e impostazioni restano quelli della VM. Per ogni sonda
-  del backup scegli su quale sonda dell'account va il suo storico (proposta: stessa sonda o stesso
-  nome; *Non importare* per saltarla), poi:
-  - **Unisci**: aggiunge ciò che manca, senza toccare i dati già presenti (ripeterlo non crea doppioni);
-  - **Sovrascrivi**: nel periodo coperto dal backup valgono i dati del backup; prima e dopo resta lo
-    storico della VM.
-
-**Password dell'amministratore dimenticata.** Gli amministratori vivono solo sul gateway: il comando
-`account.py crea-admin EMAIL` (vedi *Password dimenticata*) si lancia sul gateway. Per lo stesso motivo
-`https://vmN.…/admin` rimanda al pannello del gateway (`https://dominio/admin`).
-
-
-**Cambiare dominio** (per esempio da `netmon-public.com` a `netmonhome.net`). Le sonde stanno a casa degli
-utenti e hanno in `config.yaml` l'indirizzo della loro VM: il vecchio nome resta attivo e le rimanda al nuovo,
-così passano da sole.
-
-1. Nel DNS del nuovo dominio crea gli stessi record A del vecchio (`netmonhome.net` verso il gateway,
-   `vm1.netmonhome.net`, `vm2.…` verso le VM). **Non togliere** i vecchi.
-2. Sul gateway: `sudo bash ~/netmon/server/installa-server.sh --orchestratore`, scelta **2) Riconfigurare**, e
-   scrivi il nuovo dominio.
-3. Per ogni VM: nel pannello (ora su `https://netmonhome.net/admin`) *Server › Tutte le VM › Collega una VM*
-   con il nome della VM (`vm1`…), poi sulla VM `sudo bash ~/netmon/server/installa-server.sh --dietro-gateway`
-   con gateway `netmonhome.net` e indirizzo `vm1.netmonhome.net`. Account, sonde e dati restano.
-
-L'installatore scrive i nomi precedenti di ogni macchina in `OLD_HOSTS` nel `.env` (sul gateway anche in
-`/opt/netmon-gateway/.env`) e li lascia nel Caddyfile accanto a quello nuovo, con il loro certificato. Chi arriva
-a un vecchio nome è rimandato al nuovo indirizzo: i browser con un reindirizzamento permanente (gli utenti
-rientrano una volta, perché la sessione vale per il nome), le sonde con la stessa risposta degli utenti spostati,
-e scrivono il nuovo indirizzo in `config.yaml` da sole. Vale per le sonde con i programmi dal 13 ottobre 2026
-(pomeriggio) in poi; le più vecchie si aggiornano prima, oppure si cambia l'indirizzo a mano
-(`installa-sonda.sh`, **2) Riconfigurare**). I record DNS vecchi si tolgono quando in *Sonde › Elenco sonde*
-tutte le sonde scrivono di nuovo: allora cancella la riga `OLD_HOSTS=` dal `.env` di ogni macchina e
-rilancia lo stesso comando dei passi 2 e 3.

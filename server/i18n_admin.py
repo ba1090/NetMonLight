@@ -3,7 +3,7 @@ francese). Stesso formato di TRANSLATIONS in i18n.py: chiave il testo italiano, 
 Stanno a parte perché la pagina utente non le carica (sono solo per il pannello e i suoi avvisi).
 Per i testi nuovi: python3 tools/i18n-estrai.py admin --mancanti
 """
-__version__ = "1.1.20261026-104239"
+__version__ = "1.1.20261027-161500"
 
 ADMIN_TRANSLATIONS = {
     "en": {
@@ -2661,3 +2661,111 @@ for _it, _tr in {
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
 del _it, _tr, _lang, _text
+
+
+# NetMon Light: un solo server (pannello senza le parti per più VM)
+_LIGHT = {
+    "(misure, eventi, traffico, speedtest). Account, sonde, token e impostazioni restano quelli del server.":
+        ("(measurements, events, traffic, speed tests). Account, probes, tokens and settings stay as they are on the server.",
+         "(Messwerte, Ereignisse, Verkehr, Speedtests). Konto, Sonden, Token und Einstellungen bleiben die des Servers.",
+         "(mesures, événements, trafic, tests de débit). Le compte, les sondes, les jetons et les réglages restent ceux du serveur."),
+    ": aggiunge allo storico del server ciò che manca, senza toccare quello che c'è già":
+        (": adds to the server's history what is missing, without touching what is already there",
+         ": ergänzt im Verlauf des Servers, was fehlt, ohne das Vorhandene zu verändern",
+         " : ajoute à l'historique du serveur ce qui manque, sans toucher à ce qui s'y trouve déjà"),
+    ": nel periodo coperto dal backup vale il backup (i dati del server di quel periodo vengono sostituiti); prima e dopo resta lo storico del server":
+        (": in the period covered by the backup the backup wins (the server's data for that period is replaced); before and after, the server's history stays",
+         ": im vom Backup abgedeckten Zeitraum gilt das Backup (die Daten des Servers aus diesem Zeitraum werden ersetzt); davor und danach bleibt der Verlauf des Servers",
+         " : sur la période couverte par la sauvegarde, c'est la sauvegarde qui compte (les données du serveur de cette période sont remplacées) ; avant et après, l'historique du serveur reste"),
+    "<strong>Importa un utente</strong> da un altro server netmon: il file del pulsante <em>Esporta</em> nella pagina Utenti dell'altro server. Arrivano account, sonde e storico: l'utente entra con la sua password e le sonde continuano con il loro token, in pausa per un'ora (niente avvisi mentre le sposti). Se l'account c'è già qui si importa solo lo storico (unito o sovrascritto), sulle sonde che scegli.":
+        ("<strong>Import a user</strong> from another netmon server: the file from the <em>Export</em> button on the Users page of the other server. Account, probes and history come along: the user signs in with their password and the probes carry on with their token, paused for an hour (no alerts while you move them). If the account already exists here, only the history is imported (merged or overwritten), on the probes you choose.",
+         "<strong>Einen Benutzer importieren</strong> von einem anderen netmon-Server: die Datei der Schaltfläche <em>Exportieren</em> auf der Seite Benutzer des anderen Servers. Konto, Sonden und Verlauf kommen mit: Der Benutzer meldet sich mit seinem Passwort an und die Sonden laufen mit ihrem Token weiter, eine Stunde pausiert (keine Warnungen, während du sie umziehst). Gibt es das Konto hier schon, wird nur der Verlauf importiert (zusammengeführt oder überschrieben), auf den Sonden deiner Wahl.",
+         "<strong>Importer un utilisateur</strong> depuis un autre serveur netmon : le fichier du bouton <em>Exporter</em> de la page Utilisateurs de l'autre serveur. Le compte, les sondes et l'historique arrivent : l'utilisateur se connecte avec son mot de passe et les sondes continuent avec leur jeton, en pause pendant une heure (aucune alerte pendant que tu les déplaces). Si le compte existe déjà ici, seul l'historique est importé (fusionné ou écrasé), sur les sondes que tu choisis."),
+    "nella pagina Utenti dell'altro server. Arrivano account, sonde e storico: l'utente entra con la sua password e le sonde continuano con il loro token, in pausa per un'ora (niente avvisi mentre le sposti). Se l'account c'è già qui si importa solo lo storico (unito o sovrascritto), sulle sonde che scegli.":
+        ("on the Users page of the other server. Account, probes and history come along: the user signs in with their password and the probes carry on with their token, paused for an hour (no alerts while you move them). If the account already exists here, only the history is imported (merged or overwritten), on the probes you choose.",
+         "auf der Seite Benutzer des anderen Servers. Konto, Sonden und Verlauf kommen mit: Der Benutzer meldet sich mit seinem Passwort an und die Sonden laufen mit ihrem Token weiter, eine Stunde pausiert (keine Warnungen, während du sie umziehst). Gibt es das Konto hier schon, wird nur der Verlauf importiert (zusammengeführt oder überschrieben), auf den Sonden deiner Wahl.",
+         "de la page Utilisateurs de l'autre serveur. Le compte, les sondes et l'historique arrivent : l'utilisateur se connecte avec son mot de passe et les sondes continuent avec leur jeton, en pause pendant une heure (aucune alerte pendant que tu les déplaces). Si le compte existe déjà ici, seul l'historique est importé (fusionné ou écrasé), sur les sondes que tu choisis."),
+    "Caricamento… {0}%": ("Uploading… {0}%", "Hochladen… {0}%", "Envoi… {0}%"),
+    "Confermare la versione nuova?": ("Confirm the new version?", "Die neue Version bestätigen?", "Confirmer la nouvelle version ?"),
+    "Dice se l'invio funziona o il motivo dell'errore (per esempio <em>535 Username and Password not accepted</em> = password sbagliata).":
+        ("Tells you whether sending works or why it fails (for example <em>535 Username and Password not accepted</em> = wrong password).",
+         "Zeigt, ob der Versand funktioniert, oder den Grund des Fehlers (zum Beispiel <em>535 Username and Password not accepted</em> = falsches Passwort).",
+         "Indique si l'envoi fonctionne ou la raison de l'erreur (par exemple <em>535 Username and Password not accepted</em> = mauvais mot de passe)."),
+    "Dice se l'invio funziona o il motivo dell'errore (per esempio":
+        ("Tells you whether sending works or why it fails (for example",
+         "Zeigt, ob der Versand funktioniert, oder den Grund des Fehlers (zum Beispiel",
+         "Indique si l'envoi fonctionne ou la raison de l'erreur (par exemple"),
+    "Esportare {0} con sonde e storico in un file cifrato, per spostarlo su un altro server? Si apre solo con la password del file: cancellalo comunque dopo l'importazione.":
+        ("Export {0} with probes and history to an encrypted file, to move it to another server? It opens only with the file password: delete it anyway after the import.",
+         "{0} mit Sonden und Verlauf in eine verschlüsselte Datei exportieren, um es auf einen anderen Server umzuziehen? Sie öffnet sich nur mit dem Passwort der Datei: lösche sie nach dem Import trotzdem.",
+         "Exporter {0} avec ses sondes et son historique dans un fichier chiffré, pour le déplacer vers un autre serveur ? Il ne s'ouvre qu'avec le mot de passe du fichier : supprime-le quand même après l'importation."),
+    "Il server ha già la versione {0}: aggiornamento non necessario":
+        ("The server already has version {0}: no update needed",
+         "Der Server hat bereits die Version {0}: kein Update nötig",
+         "Le serveur a déjà la version {0} : mise à jour inutile"),
+    "Il server ha già questa versione (o una più recente): non c'è niente da aggiornare.":
+        ("The server already has this version (or a newer one): there is nothing to update.",
+         "Der Server hat bereits diese Version (oder eine neuere): es gibt nichts zu aktualisieren.",
+         "Le serveur a déjà cette version (ou une plus récente) : il n'y a rien à mettre à jour."),
+    "Importazione di {0} in corso…": ("Importing {0}…", "{0} wird importiert…", "Importation de {0} en cours…"),
+    "Inviata, controlla la casella (anche lo spam)":
+        ("Sent, check the inbox (spam too)", "Gesendet, prüfe das Postfach (auch den Spam)", "Envoyé, vérifie la boîte de réception (et les spams)"),
+    "Invio in corso…": ("Sending…", "Wird gesendet…", "Envoi en cours…"),
+    "L'account da cui partono tutte le email: avvisi e scadenze agli utenti, codici e avvisi agli amministratori. Finché non lo scegli valgono le righe <code>SMTP_…</code> del <code>.env</code>. Con Gmail serve una <strong>password per le app</strong> (myaccount.google.com/apppasswords), non quella dell'account.":
+        ("The account all emails are sent from: alerts and expiry notices to users, codes and alerts to administrators. Until you choose one, the <code>SMTP_…</code> lines of the <code>.env</code> apply. With Gmail you need an <strong>app password</strong> (myaccount.google.com/apppasswords), not the account password.",
+         "Das Konto, von dem alle E-Mails ausgehen: Warnungen und Ablaufhinweise an die Benutzer, Codes und Warnungen an die Administratoren. Solange du keines wählst, gelten die Zeilen <code>SMTP_…</code> der <code>.env</code>. Mit Gmail brauchst du ein <strong>App-Passwort</strong> (myaccount.google.com/apppasswords), nicht das Passwort des Kontos.",
+         "Le compte d'où partent tous les emails : alertes et échéances aux utilisateurs, codes et alertes aux administrateurs. Tant que tu n'en choisis pas, ce sont les lignes <code>SMTP_…</code> du <code>.env</code> qui comptent. Avec Gmail il faut un <strong>mot de passe d'application</strong> (myaccount.google.com/apppasswords), pas celui du compte."),
+    "L'account da cui partono tutte le email: avvisi e scadenze agli utenti, codici e avvisi agli amministratori. Finché non lo scegli valgono le righe":
+        ("The account all emails are sent from: alerts and expiry notices to users, codes and alerts to administrators. Until you choose one, these lines apply:",
+         "Das Konto, von dem alle E-Mails ausgehen: Warnungen und Ablaufhinweise an die Benutzer, Codes und Warnungen an die Administratoren. Solange du keines wählst, gelten die Zeilen",
+         "Le compte d'où partent tous les emails : alertes et échéances aux utilisateurs, codes et alertes aux administrateurs. Tant que tu n'en choisis pas, ce sont les lignes"),
+    "L'account esiste già su questo server: si importa <strong>solo lo storico</strong> (misure, eventi, traffico, speedtest). Account, sonde, token e impostazioni restano quelli del server.":
+        ("The account already exists on this server: importing <strong>only the history</strong> (measurements, events, traffic, speed tests). Account, probes, tokens and settings stay as they are on the server.",
+         "Das Konto existiert bereits auf diesem Server: importiert wird <strong>nur der Verlauf</strong> (Messwerte, Ereignisse, Verkehr, Speedtests). Konto, Sonden, Token und Einstellungen bleiben die des Servers.",
+         "Le compte existe déjà sur ce serveur : on importe <strong>uniquement l'historique</strong> (mesures, événements, trafic, tests de débit). Le compte, les sondes, les jetons et les réglages restent ceux du serveur."),
+    "L'account esiste già su questo server: si importa":
+        ("The account already exists on this server: importing", "Das Konto existiert bereits auf diesem Server: importiert wird",
+         "Le compte existe déjà sur ce serveur : on importe"),
+    "Non inviata ({0})": ("Not sent ({0})", "Nicht gesendet ({0})", "Non envoyé ({0})"),
+    "Partita da: server.": ("Sent from: server.", "Gesendet von: Server.", "Envoyé depuis : serveur."),
+    "Senza conferma, alla scadenza il server torna da solo alla versione precedente. «Conferma la nuova versione» la tiene.":
+        ("Without confirmation, when the time is up the server goes back to the previous version by itself. «Confirm the new version» keeps it.",
+         "Ohne Bestätigung kehrt der Server bei Ablauf von selbst zur vorherigen Version zurück. «Neue Version bestätigen» behält sie.",
+         "Sans confirmation, à l'échéance le serveur revient de lui-même à la version précédente. « Confirmer la nouvelle version » la conserve."),
+    "Sovrascrivere? Nel periodo coperto dal backup i dati di queste sonde sul server vengono sostituiti da quelli del backup.":
+        ("Overwrite? In the period covered by the backup, the data of these probes on the server is replaced by the backup's.",
+         "Überschreiben? Im vom Backup abgedeckten Zeitraum werden die Daten dieser Sonden auf dem Server durch die des Backups ersetzt.",
+         "Écraser ? Sur la période couverte par la sauvegarde, les données de ces sondes sur le serveur sont remplacées par celles de la sauvegarde."),
+    "Storico di {0} {1}: {2} righe importate su {3}.":
+        ("History of {0} {1}: {2} rows imported on {3}.", "Verlauf von {0} {1}: {2} Zeilen auf {3} importiert.",
+         "Historique de {0} {1} : {2} lignes importées sur {3}."),
+    "Tornare alle righe SMTP_… del .env? L'account scelto qui viene tolto.":
+        ("Go back to the SMTP_… lines of the .env? The account chosen here is removed.",
+         "Zu den Zeilen SMTP_… der .env zurückkehren? Das hier gewählte Konto wird entfernt.",
+         "Revenir aux lignes SMTP_… du .env ? Le compte choisi ici est retiré."),
+    "Versione nuova da confermare: dalla {0} alla {1}":
+        ("New version to confirm: from {0} to {1}", "Neue Version zu bestätigen: von {0} auf {1}",
+         "Nouvelle version à confirmer : de la {0} à la {1}"),
+    "righe SMTP_* del .env": ("SMTP_* lines of the .env", "Zeilen SMTP_* der .env", "lignes SMTP_* du .env"),
+    "{0} Prova l'invio qui sotto.": ("{0} Try sending below.", "{0} Probiere den Versand unten aus.", "{0} Essaie l'envoi ci-dessous."),
+    "{0} importato con {1}. Se le sonde scrivono ancora al vecchio server, cambia sulla sonda l'indirizzo del server in {2}/api/report.":
+        ("{0} imported with {1}. If the probes still write to the old server, change the server address on the probe to {2}/api/report.",
+         "{0} mit {1} importiert. Schreiben die Sonden noch an den alten Server, ändere auf der Sonde die Serveradresse auf {2}/api/report.",
+         "{0} importé avec {1}. Si les sondes écrivent encore à l'ancien serveur, change sur la sonde l'adresse du serveur en {2}/api/report."),
+    "{0}. Ci sono già sonde con le stesse chiavi ({1}).":
+        ("{0}. There are already probes with the same keys ({1}).", "{0}. Es gibt bereits Sonden mit denselben Schlüsseln ({1}).",
+         "{0}. Il y a déjà des sondes avec les mêmes clés ({1})."),
+    "{0}. L'account esiste ma non ha sonde: crea prima le sue sonde, poi importa lo storico.":
+        ("{0}. The account exists but has no probes: create its probes first, then import the history.",
+         "{0}. Das Konto existiert, hat aber keine Sonden: lege zuerst seine Sonden an, dann importiere den Verlauf.",
+         "{0}. Le compte existe mais n'a pas de sondes : crée d'abord ses sondes, puis importe l'historique."),
+    "{0}. Pronto per l'importazione.{1}": ("{0}. Ready to import.{1}", "{0}. Bereit zum Import.{1}", "{0}. Prêt pour l'importation.{1}"),
+    "{0}. Questo account c'è già: scegli come importare lo storico.":
+        ("{0}. This account already exists: choose how to import the history.",
+         "{0}. Dieses Konto gibt es bereits: wähle, wie der Verlauf importiert wird.",
+         "{0}. Ce compte existe déjà : choisis comment importer l'historique."),
+}
+for _it, _tr in _LIGHT.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
+del _LIGHT, _it, _tr, _lang, _text

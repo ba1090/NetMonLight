@@ -6,7 +6,7 @@ Il database (auth.db) non contiene nulla di riutilizzabile se venisse copiato:
   soltanto nel cookie del browser.
 Il file viene creato con permessi 600 (leggibile solo dall'utente del servizio).
 """
-__version__ = "1.1.20261026-104239"
+__version__ = "1.1.20261027-161500"
 import ipaddress
 import base64
 import hashlib
@@ -38,23 +38,15 @@ ADMIN_SESSION_HOURS = 8           # pagina di amministrazione: sessione breve, s
 # e in archivio ne resta la sola impronta, come per le sessioni.
 ADMIN_TRUST_DAYS = 15
 
-# Più VM dietro un gateway: ogni VM scrive il proprio nome (VM_ID nel .env, es. vm2) in testa a
-# token delle sonde, sessioni e codici di accesso, separato da un punto. Il punto non compare mai
-# in token_urlsafe, quindi il gateway capisce senza ambiguità a quale VM mandare la richiesta.
-# Vuoto (il caso normale, un server solo): token identici a prima.
-VM_ID = os.environ.get("VM_ID", "").strip().lower()
 # Piano con cui nasce ogni nuovo account: basso, medio, alto, oppure vuoto (nessun piano = limiti predefiniti)
 NEW_USER_PLAN = os.environ.get("NEW_USER_PLAN", "basso").strip().lower() or None
 if NEW_USER_PLAN not in (None, "basso", "medio", "alto"):
     NEW_USER_PLAN = "basso"
-if VM_ID and not re.fullmatch(r"[a-z0-9]{1,16}", VM_ID):
-    raise SystemExit(f"VM_ID non valido: {VM_ID!r} (solo lettere minuscole e cifre, al massimo 16)")
-VM_TAG = VM_ID + "." if VM_ID else ""
 
 
 def new_secret(nbytes: int) -> str:
-    """Segreto casuale con il nome della VM davanti (se ce n'è uno)."""
-    return VM_TAG + secrets.token_urlsafe(nbytes)
+    """Segreto casuale (token delle sonde, sessioni, codici di accesso)."""
+    return secrets.token_urlsafe(nbytes)
 
 VERIFY_HOURS = 48                 # validità del link di conferma dell'email di un utente
 VERIFY_GAP = 600                  # secondi minimi tra due link di conferma allo stesso utente
@@ -356,7 +348,7 @@ class AuthDB:
             scols = {r[1] for r in c.execute("PRAGMA table_info(schedules)")}
             for col, ddl in (("package", "TEXT"),          # JSON {version, sha256, file}: pacchetto caricato
                              ("after_id", "INTEGER"),      # parte quando è finita questa programmazione (VM)
-                             ("batch", "TEXT")):           # campagna del pannello: un riepilogo per tutte le VM
+                             ("batch", "TEXT")):           # campagna del pannello: un solo riepilogo
                 if col not in scols:
                     c.execute(f"ALTER TABLE schedules ADD COLUMN {col} {ddl}")
             # la colonna is_admin ("utente principale") non è più usata: tutti gli utenti sono uguali
@@ -486,7 +478,7 @@ class AuthDB:
             return c.execute("DELETE FROM admins WHERE login = ?", (normalize_email(login),)).rowcount > 0
 
     def is_admin_email(self, email: str) -> bool:
-        """C'è un amministratore con questo accesso o questa email? (pagina d'accesso del gateway)"""
+        """C'è un amministratore con questo accesso o questa email? """
         e = (email or "").strip().lower()
         if not e:
             return False

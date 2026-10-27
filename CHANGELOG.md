@@ -7,6 +7,24 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
+## 27 ottobre 2026 (1.1.20261027-161500 · 1 versione) — NetMon Light
+
+- **NetMon Light: una sola VM per tutto.** Pagina di stato degli utenti, pannello di amministrazione (admin e
+  utenti) e sonde dei vari utenti stanno sulla stessa VM. Tolti il gateway (`gateway/`, pagina d'accesso
+  comune e smistamento), l'orchestratore (`ROLE=orchestratore`) e le VM probe (`VM_ID`, `GATEWAY_SECRET`,
+  `GATEWAY_URL`): niente più rotte `/internal/*`, `/api/vm/*`, `/api/admin/vms*`, `/api/admin/probes/all`,
+  `/api/admin/schedules/all` né inoltro del pannello alle VM (`X-Netmon-VM`). *Server.*
+- **Pannello senza parti per più VM**: via *Server › Tutte le VM* (mappa, elenco, *Collega una VM*), la barra
+  delle macchine, la colonna *VM* in utenti, utenti non attivi e sonde, la scelta della VM per inviti e
+  importazioni, *Sposta su un'altra VM* e l'installazione del pacchetto a cascata sulle VM. Restano
+  *Esporta (file cifrato)* e *Importa un utente*, anche per portare utenti da un'installazione NetMon con
+  gateway. Invio email, conservazione dei dati ed email di prova valgono per il server. *Pannello.*
+- **Installazione**: `installa-server.sh` ha solo l'installazione guidata e `--aggiorna` (tolti
+  `--orchestratore` e `--dietro-gateway`); `env.example` senza le variabili delle più VM. *Server.*
+- **Documenti**: README, INSTALLAZIONE (Caso 4: arrivare da NetMon con più VM) e GUIDA (nuove sezioni
+  *Esportare e importare un utente* e *Cambiare dominio*; tolto il capitolo sulle più VM); informativa sulla
+  privacy con un solo server. *Documenti, informativa.*
+
 ## 26 ottobre 2026 (1.1.20261026-104239 · 3 versioni)
 
 - **Trasferimento degli utenti cifrato con una password**: *Utenti → Esporta (file cifrato)* chiede una password

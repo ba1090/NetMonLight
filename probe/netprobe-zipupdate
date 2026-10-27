@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261026-104239
+# netmon versione 1.1.20261027-161500
 # Aggiornamento completo della sonda con il pacchetto netmon.zip scaricato dal server:
 # come "sudo bash installa-sonda.sh --aggiorna" (programmi, script di sistema, permessi e servizi).
 # Installazione: sudo install -m 755 -o root -g root netprobe-zipupdate /usr/local/sbin/
