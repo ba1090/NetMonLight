@@ -9,7 +9,7 @@ Sostituisce SOLO il numero di versione attuale (letto dal file VERSION), come te
 in tutti i file del pacchetto. Non usa espressioni regolari sui sorgenti: così non può
 modificare per errore il codice (com'era successo alle regex della versione in app.py).
 Alla fine controlla che server e sonda si compilino, che tutti i file abbiano la stessa versione
-e crea SEMPRE lo zip ../netmon-<versione>.zip, verificato con pkgcheck (sotto netmon/, sotto i
+e crea SEMPRE lo zip ../netmon-light-<versione>.zip, verificato con pkgcheck (sotto netmon/, sotto i
 10 MB, meno di 300 file, senza .DS_Store, __pycache__ o *.pyc).
 
 OGNI zip porta la sua versione: a ogni modifica, anche di un solo carattere, si alza la
@@ -39,8 +39,8 @@ TEXT_EXT = {".py", ".sh", ".md", ".txt", ".service", ".socket", ".example", ""}
 
 
 def build_zip(version: str, problems: list[str]) -> Path:
-    """Crea ../netmon-<versione>.zip da tutto il contenuto della cartella netmon/ e lo verifica."""
-    out = ZIP_OUT / f"netmon-{version}.zip"
+    """Crea ../netmon-light-<versione>.zip da tutto il contenuto della cartella netmon/ e lo verifica."""
+    out = ZIP_OUT / f"netmon-light-{version}.zip"
     entries = []
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file():
@@ -176,7 +176,7 @@ def main():
     if not (ROOT / "server" / "release-key.pub").is_file():
         print("\nATTENZIONE: manca server/release-key.pub (chiave pubblica di rilascio). Creala con «Firma NetMon»\n"
               "sul Mac (tools/mac) e mettila nel repository: una VM senza chiave rifiuta i pacchetti dal pannello.")
-    print("\nZip: ../netmon-<versione>.zip. Firmalo sul Mac con «Firma NetMon» e carica nel pannello lo zip\n"
+    print("\nZip: ../netmon-light-<versione>.zip. Firmalo sul Mac con «Firma NetMon» e carica nel pannello lo zip\n"
           "insieme al suo .sig. Ogni prossima modifica, anche minima, alza la versione.")
 
 

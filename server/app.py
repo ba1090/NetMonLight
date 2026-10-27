@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261027-171500"
+__version__ = "1.1.20261027-171600"
 VERSION = __version__
 import asyncio
 import base64
@@ -8390,7 +8390,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261027-171500") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261027-171600") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */

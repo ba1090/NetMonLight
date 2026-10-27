@@ -1,6 +1,6 @@
 # Firma NetMon (Mac)
 
-App per il tuo Mac che firma i pacchetti `netmon-<versione>.zip`. Dalla 1.1 la VM installa dal pannello
+App per il tuo Mac che firma i pacchetti `netmon-light-<versione>.zip`. Dalla 1.1 la VM installa dal pannello
 `/admin` **solo pacchetti firmati con la tua chiave di rilascio**: chi entrasse nel pannello non potrebbe
 far girare codice suo come root sulla VM, né sulle sonde degli utenti.
 
@@ -80,8 +80,8 @@ dell'autore NON valida per la chiave …*).
 
 ## A ogni rilascio
 
-1. **Firma un pacchetto** → scegli `netmon-<versione>.zip` → password → **Firma**.
-2. Il browser scarica in *Download* la firma `netmon-<versione>.zip.sig` e, se l'app ha aggiunto la tua
+1. **Firma un pacchetto** → scegli `netmon-light-<versione>.zip` → password → **Firma**.
+2. Il browser scarica in *Download* la firma `netmon-light-<versione>.zip.sig` e, se l'app ha aggiunto la tua
    chiave, anche lo zip aggiornato: da quel momento usa **quello**, non lo zip di prima. (Con le finestre
    di sistema, invece, il `.sig` compare accanto allo zip e la chiave entra nello zip stesso.)
 3. Pannello `/admin` → *Server › Aggiornamento Netmon* → seleziona **insieme** lo zip e il `.sig`
@@ -116,7 +116,7 @@ bash tools/firma/build.sh     # FirmaNetMon.exe e i due programmi per il Mac, co
 ## Da Terminale (stesse operazioni)
 
 ```bash
-openssl dgst -sha256 -sign release-signing.key -out sig.der netmon-<versione>.zip
-openssl base64 -A -in sig.der > netmon-<versione>.zip.sig
-openssl dgst -sha256 -verify release-key.pub -signature sig.der netmon-<versione>.zip
+openssl dgst -sha256 -sign release-signing.key -out sig.der netmon-light-<versione>.zip
+openssl base64 -A -in sig.der > netmon-light-<versione>.zip.sig
+openssl dgst -sha256 -verify release-key.pub -signature sig.der netmon-light-<versione>.zip
 ```

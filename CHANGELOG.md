@@ -7,8 +7,9 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 27 ottobre 2026 (1.1.20261027-171500 · 2 versioni) — NetMon Light
+## 27 ottobre 2026 (1.1.20261027-171600 · 3 versioni) — NetMon Light
 
+- **Zip del rilascio `netmon-light-<versione>.zip`**: `tools/nuova-versione.py` crea lo zip con il nome di NetMon Light (prima `netmon-<versione>.zip`); dentro resta la cartella `netmon/`, quindi installazione e aggiornamento non cambiano. *Strumenti, documenti.*
 - **Dispositivi in rete** (da NetMon 1.1.20261027-160153): nella pagina *Stato rete › FRITZ!Box*, sotto i
   riquadri, l'elenco dei dispositivi che il FRITZ!Box conosce, con nome, IP, collegamento (cavo con porta LAN, o
   Wi-Fi con banda e repeater), segnale in dBm con le tacche e velocità del collegamento (non il traffico, che il

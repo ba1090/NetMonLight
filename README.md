@@ -49,10 +49,10 @@ con NetMon Light, e un utente si porta da NetMon a NetMon Light con *Esporta* / 
 ## Installazione in breve
 
 Sulla VM (Ubuntu 24.04 o Debian 12/13, porte 80 e 443 aperte, un dominio che punta alla VM), con lo zip
-del rilascio (`netmon-<versione>.zip`, creato con `python3 tools/nuova-versione.py`) nella home:
+del rilascio (`netmon-light-<versione>.zip`, creato con `python3 tools/nuova-versione.py`) nella home:
 
 ```bash
-cd ~ && sudo apt install -y unzip && rm -rf ~/netmon && unzip -q netmon-<versione>.zip
+cd ~ && sudo apt install -y unzip && rm -rf ~/netmon && unzip -q netmon-light-<versione>.zip
 sudo bash ~/netmon/server/installa-server.sh
 ```
 

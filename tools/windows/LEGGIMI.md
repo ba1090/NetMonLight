@@ -1,6 +1,6 @@
 # Firma NetMon (Windows)
 
-`FirmaNetMon.exe` firma i pacchetti `netmon-<versione>.zip` su Windows. È lo stesso programma, con la stessa
+`FirmaNetMon.exe` firma i pacchetti `netmon-light-<versione>.zip` su Windows. È lo stesso programma, con la stessa
 pagina, che usa l'app *Firma NetMon* per il Mac (`tools/mac`). Dalla 1.1 la VM installa dal pannello `/admin` **solo pacchetti firmati con la tua
 chiave di rilascio**.
 
@@ -58,9 +58,9 @@ dell'autore NON valida per la chiave …*).
 
 ## A ogni rilascio
 
-1. **Firma un pacchetto** → scegli `netmon-<versione>.zip` (lo zip del rilascio, non il «Download ZIP» di
+1. **Firma un pacchetto** → scegli `netmon-light-<versione>.zip` (lo zip del rilascio, non il «Download ZIP» di
    GitHub) → password → **Firma**.
-2. Il browser scarica la firma `netmon-<versione>.zip.sig`. Se il pacchetto non conteneva ancora la tua
+2. Il browser scarica la firma `netmon-light-<versione>.zip.sig`. Se il pacchetto non conteneva ancora la tua
    chiave pubblica, il programma ce la aggiunge e scarica anche lo zip aggiornato: da quel momento usa
    **quello** (è nella cartella *Download*), non lo zip di prima.
 3. Pannello `/admin` → *Server › Aggiornamento Netmon* → seleziona **insieme** lo zip e il `.sig`. Tra i

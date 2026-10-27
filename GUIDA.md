@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261027-171500*
+*Versione di netmon: 1.1.20261027-171600*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -200,11 +200,11 @@ qualche minuto ad aggiornarsi: lo script di installazione controlla che il nome 
 
 ### A3. Installazione guidata
 
-Dopo aver creato la VM (A1) e il record DNS (A2), carica lo zip della versione (`netmon-<versione>.zip`) nella home della VM (con Google Cloud:
+Dopo aver creato la VM (A1) e il record DNS (A2), carica lo zip della versione (`netmon-light-<versione>.zip`) nella home della VM (con Google Cloud:
 finestra SSH del browser → **Carica file**) e lancia:
 
 ```bash
-cd ~ && sudo apt install -y unzip && rm -rf ~/netmon && unzip -q netmon-<versione>.zip
+cd ~ && sudo apt install -y unzip && rm -rf ~/netmon && unzip -q netmon-light-<versione>.zip
 sudo bash ~/netmon/server/installa-server.sh
 ```
 
@@ -1560,8 +1560,8 @@ La pulizia usa l'indice che il database ha già per lo storico, a pezzi: anche c
 pochi millesimi di secondo e non blocca i report delle sonde mentre lavora.
 
 **Aggiornamento Netmon (VM).** *Server › Aggiornamento Netmon*: seleziona **insieme** il file
-`netmon-<versione>.zip` della nuova versione (quello del rilascio, non lo zip «Download ZIP» di GitHub, che ha una
-cartella sbagliata) e la sua firma `netmon-<versione>.zip.sig`, fatta con *Firma NetMon* sul Mac o su Windows (vedi
+`netmon-light-<versione>.zip` della nuova versione (quello del rilascio, non lo zip «Download ZIP» di GitHub, che ha una
+cartella sbagliata) e la sua firma `netmon-light-<versione>.zip.sig`, fatta con *Firma NetMon* sul Mac o su Windows (vedi
 *Firma dell'autore* qui sotto). Vengono caricati e controllati subito, e l'elenco dei controlli
 dice se il pacchetto è **idoneo**: firma dell'autore valida per la chiave di rilascio della VM, zip integro, tutti i file al loro posto dentro `netmon/` (niente percorsi che escono dalla
 cartella né collegamenti), tutti i programmi della stessa versione, versione **più alta** di quella installata,
@@ -2056,7 +2056,7 @@ dal 14 ottobre 2026 è `1.1`, con la firma dell'autore sui pacchetti. Per sapere
 L'aggiornamento guidato mostra alla fine *versione vecchia → nuova*.
 
 **Preparare un rilascio.** Lo script `tools/nuova-versione.py` (da dentro la cartella
-`netmon`) alza la versione in **tutti** i file e crea **sempre** la zip `../netmon-<versione>.zip`,
+`netmon`) alza la versione in **tutti** i file e crea **sempre** la zip `../netmon-light-<versione>.zip`,
 controllata da `pkgcheck.py` (contenuto, link, sintassi, versione uguale in ogni programma):
 
 ```bash
@@ -2091,7 +2091,7 @@ permessi degli aggiornamenti dal pannello), aggiornando da una 1.x, o se il pann
 Prima la VM, poi le sonde:
 
 ```bash
-cd ~ && rm -rf ~/netmon && unzip -q netmon-<versione>.zip
+cd ~ && rm -rf ~/netmon && unzip -q netmon-light-<versione>.zip
 sudo bash ~/netmon/server/installa-server.sh --aggiorna   # sulla VM
 ```
 
@@ -2184,7 +2184,7 @@ dal `.env` e rilancia lo stesso comando del passo 2.
 | La sonda riceve `500` | Errore del server: guarda `sudo journalctl -u netmon-server -n 50`. Per rimettere a posto file e permessi: `sudo bash netmon/server/installa-server.sh --aggiorna`. |
 | La sonda riceve `401` | Il token non è valido, oppure è la chiave del server (che non vale per le sonde). Genera un token nella pagina, Impostazioni → Sonde, e inseriscilo nella pagina locale della sonda, sezione *Server*. |
 | La sonda riceve `429` | Troppi report in poco tempo: di solito una copia di `probe.py` lanciata a mano oltre al servizio. Vedi la riga *IP e RTT* qui sotto. |
-| *Aggiornamento Netmon*: *Mancano file necessari* o *Percorsi non ammessi: NetMon-main/…* | Hai caricato il «Download ZIP» di GitHub, che ha la cartella `NetMon-main/` invece di `netmon/` (e il codice di `main`, non quello della PR). Serve lo zip del rilascio `netmon-<versione>.zip`, creato da `python3 tools/nuova-versione.py`. I file nascosti del Mac (`__MACOSX/`, `._*`, `.DS_Store`) non sono un problema: vengono ignorati. |
+| *Aggiornamento Netmon*: *Mancano file necessari* o *Percorsi non ammessi: NetMon-main/…* | Hai caricato il «Download ZIP» di GitHub, che ha la cartella `NetMon-main/` invece di `netmon/` (e il codice di `main`, non quello della PR). Serve lo zip del rilascio `netmon-light-<versione>.zip`, creato da `python3 tools/nuova-versione.py`. I file nascosti del Mac (`__MACOSX/`, `._*`, `.DS_Store`) non sono un problema: vengono ignorati. |
 | *Aggiornamento Netmon*: *Manca la firma dell'autore* | Hai selezionato solo lo zip: seleziona insieme lo zip e il suo `.sig` (tieni premuto ⌘ sul Mac). Il `.sig` lo crea *Firma NetMon* accanto allo zip. |
 | *Aggiornamento Netmon*: *Firma dell'autore NON valida* | Lo zip è stato modificato dopo la firma (riscaricalo e rifirmalo), oppure è firmato con una chiave diversa da quella della VM: l'impronta nel messaggio è quella della VM, confrontala con quella di *Firma NetMon*. Firmi da più computer (Mac e Windows)? Devono avere la stessa chiave: sul computer giusto *Salva una copia di riserva*, sull'altro *Usa la chiave di un altro computer* (vedi `tools/windows/LEGGIMI.md`, *Firmare da più computer*). |
 | *La VM non ha ancora la chiave di rilascio e il pacchetto non la contiene* | Firma lo zip con la versione aggiornata di *Firma NetMon* (quella dentro lo zip stesso, in `netmon/tools/mac`): aggiunge la tua chiave pubblica al pacchetto e poi lo firma. Ricarica lo zip con il **nuovo** `.sig`. Oppure aggiorna a mano via SSH con `installa-server.sh --aggiorna`. |

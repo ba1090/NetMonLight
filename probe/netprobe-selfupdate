@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261027-171500
+# netmon versione 1.1.20261027-171600
 # Aggiornamento dei programmi di netmon sulla sonda alla versione del server.
 # Installazione: sudo install -m 755 -o root -g root netprobe-selfupdate /usr/local/sbin/
 # Gira come root in un'unità systemd separata, avviata dalla sonda (utente netprobe) dopo aver
