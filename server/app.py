@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261028-180000"
+__version__ = "1.1.20261028-190000"
 VERSION = __version__
 import asyncio
 import base64
@@ -2151,7 +2151,7 @@ async def security_middleware(request: Request, call_next):
         response.headers.setdefault("Content-Security-Policy", CSP)
     # I dati (stato, sonde, account) viaggiano su /api e su /admin/api: non devono finire in nessuna
     # cache, ne' del browser ne' di un intermediario, cosi' un logout lascia davvero nulla dietro.
-    # Le pagine /status e /admin restano con ETag: sono solo gusci HTML senza dati.
+    # Le pagine /, /dashboard e /admin restano con ETag: sono solo gusci HTML senza dati.
     if request.url.path.startswith(("/api/", "/admin/api")):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
@@ -2624,7 +2624,7 @@ def send_verify_email(uid, email, base, lang="it"):
     if code is None:
         return False, wait
     from urllib.parse import quote
-    link = f"{base}/status#conferma={quote(code)}"
+    link = f"{base}/dashboard#conferma={quote(code)}"
     sent = send_admin_mail(
         email, i18n.tr(lang, "netmon: conferma la tua email"),
         i18n.tr_text(lang, "Ciao,\n\nquesto indirizzo è stato usato per creare un account su netmon, il monitoraggio della "
@@ -4050,7 +4050,7 @@ async def send_invite_mail(request: Request, adm: dict, email: str, code: str, d
     prima riga, che dice se e' un invito nuovo o uno rimandato. account: codice per chi ha già
     l'account (rientra nel suo con una nuova password)."""
     from urllib.parse import quote, urlsplit
-    link = f"{public_base(request)}/status#invito={quote(code)}&email={quote(email)}"
+    link = f"{public_base(request)}/dashboard#invito={quote(code)}&email={quote(email)}"
     # dominio da scrivere sulla sonda: quello di questa VM (lo script e l'app di Home Assistant lo
     # chiedono senza https://)
     dominio = urlsplit(public_base(request)).netloc or public_base(request)
@@ -6695,7 +6695,8 @@ PRIVACY_DAYS = {"it": ("senza limite di tempo", "1 giorno", "{0} giorni"),
 
 
 # ------------------------------------------------------------------ robots.txt e sitemap.xml (pubblici)
-# Solo le pagine pubbliche: la pagina di stato (che senza accesso mostra il login) e l'informativa.
+# Solo le pagine pubbliche: il sito di presentazione, la dashboard (che senza accesso mostra il login)
+# e l'informativa.
 # Pannello e API esclusi.
 HOST_OK = re.compile(r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
 
@@ -6710,7 +6711,7 @@ def site_base(request: Request) -> str:
 @app.api_route("/robots.txt", methods=["GET", "HEAD"])
 async def robots_txt(request: Request):
     base = site_base(request)
-    body = ("User-agent: *\nAllow: /$\nAllow: /status\nAllow: /privacy\n"
+    body = ("User-agent: *\nAllow: /$\nAllow: /en/\nAllow: /de/\nAllow: /fr/\nAllow: /dashboard\nAllow: /privacy\n"
             "Disallow: /admin\nDisallow: /api/\n"
             + (f"Sitemap: {base}/sitemap.xml\n" if base else ""))
     return Response(body, media_type="text/plain", headers={"Cache-Control": "public, max-age=3600"})
@@ -6721,10 +6722,15 @@ async def sitemap_xml(request: Request):
     base = site_base(request)
     if not base:
         raise HTTPException(404)
-    locs = [base + "/status", base + "/privacy"]
-    urls = "".join(f"  <url><loc>{u}</loc></url>\n" for u in locs)
+    # le quattro lingue del sito, ognuna con gli indirizzi delle altre (hreflang), poi dashboard e informativa
+    alt = "".join(f'<xhtml:link rel="alternate" hreflang="{lang}" href="{base}{path}"/>'
+                  for path, lang in SITO_PATHS.items() if lang in SITO_PAGES)
+    urls = "".join(f"  <url><loc>{base}{path}</loc>{alt}</url>\n" for path, lang in SITO_PATHS.items()
+                   if lang in SITO_PAGES)
+    urls += "".join(f"  <url><loc>{base}{p}</loc></url>\n" for p in ("/dashboard", "/privacy"))
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + "</urlset>\n")
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n'
+            + urls + "</urlset>\n")
     return Response(body, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
 
 
@@ -7871,7 +7877,7 @@ async def download_probe_kit(request: Request):
     l'accesso lo scarica."""
     user = await asyncio.to_thread(auth.session_user, request.cookies.get(COOKIE))
     if user is None or user.get("must_change"):
-        return RedirectResponse("/status#scarica-sonda", status_code=303)
+        return RedirectResponse("/dashboard#scarica-sonda", status_code=303)
     kit = await asyncio.to_thread(probe_kit)
     if kit is None:
         raise HTTPException(status_code=404, detail="Programma della sonda non disponibile su questo server: "
@@ -8048,10 +8054,11 @@ async def api_probe_config(u: ConfigUpdate, user: dict = Depends(ui_user)):
     return {"ok": True, "config_rev": p["config_rev"]}
 
 
-@app.get("/status", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 async def status(request: Request):
-    """La pagina non contiene dati: li chiede alle API dopo l'accesso. Il browser la conserva e
-    chiede solo se è cambiata (ETag): di solito la risposta è vuota (304)."""
+    """Pagina degli utenti (dashboard). La pagina non contiene dati: li chiede alle API dopo
+    l'accesso. Il browser la conserva e chiede solo se è cambiata (ETag): di solito la risposta è
+    vuota (304)."""
     user = await asyncio.to_thread(auth.session_user, request.cookies.get(COOKIE))
     lang = request_lang(request, user)
     page, etag = STATUS_PAGES[lang]
@@ -8062,9 +8069,52 @@ async def status(request: Request):
     return HTMLResponse(page, headers=headers)
 
 
-@app.get("/")
-async def root():
-    return RedirectResponse("/status")
+@app.get("/status")
+async def status_old():
+    """Indirizzo delle versioni precedenti (link già mandati per email, segnalibri): alla dashboard.
+    Il browser tiene la parte dopo # (#invito=…, #conferma=…)."""
+    return RedirectResponse("/dashboard", status_code=301)
+
+
+# ------------------------------------------------------------------ sito di presentazione
+# La pagina pubblica di netmonhome.net (server/sito.py, creato da tools/importa-sito.py) su /, /en/,
+# /de/ e /fr/. Senza sito.py la radice porta alla dashboard.
+try:
+    import sito
+    SITO_PAGES = {lang: (html, '"' + hashlib.sha256(html.encode()).hexdigest()[:16] + '"')
+                  for lang, html in sito.PAGES.items()}
+except ImportError:
+    SITO_PAGES = {}
+SITO_PATHS = {"/": "it", "/en/": "en", "/de/": "de", "/fr/": "fr"}
+
+
+def sito_reply(request: Request, lang: str):
+    if lang not in SITO_PAGES:
+        return RedirectResponse("/dashboard")
+    page, etag = SITO_PAGES[lang]
+    headers = {"Cache-Control": "no-cache", "ETag": etag, "Content-Language": lang}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(page, headers=headers)
+
+
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    return sito_reply(request, "it")
+
+
+def sito_route(lang: str):
+    async def page(request: Request):
+        return sito_reply(request, lang)
+
+    async def no_slash():
+        return RedirectResponse(f"/{lang}/", status_code=301)     # /en -> /en/
+    app.add_api_route(f"/{lang}/", page, methods=["GET", "HEAD"], name=f"sito_{lang}")
+    app.add_api_route(f"/{lang}", no_slash, methods=["GET", "HEAD"], name=f"sito_{lang}_slash")
+
+
+for _lang in ("en", "de", "fr"):
+    sito_route(_lang)
 
 
 # Mappa dei collegamenti (componente JavaScript comune a pagina di stato e pannello)
@@ -8465,7 +8515,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261028-180000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261028-190000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */

@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261028-180000
+# netmon versione 1.1.20261028-190000
 # Copia in /etc/netprobe/config.yaml e personalizza
 server_url: https://vm1.netmonhome.net/api/report
 token: "INCOLLA-QUI-LO-STESSO-API_TOKEN-DEL-SERVER"

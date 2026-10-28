@@ -11,9 +11,10 @@ from fastapi.routing import APIRoute
 
 from conftest import API_TOKEN, netmon
 
-# Rotte pubbliche per scelta: pagine HTML senza dati, icone, stato dell'accesso, login/registrazione.
+# Rotte pubbliche per scelta: sito di presentazione, pagine HTML senza dati, icone, stato dell'accesso, login/registrazione.
 PUBLIC = {
-    ("GET", "/"), ("GET", "/admin"), ("GET", "/status"), ("GET", "/privacy"), ("GET", "/health"),
+    ("GET", "/"), ("GET", "/admin"), ("GET", "/dashboard"), ("GET", "/status"), ("GET", "/privacy"), ("GET", "/health"),
+    ("GET", "/en/"), ("GET", "/de/"), ("GET", "/fr/"), ("GET", "/en"), ("GET", "/de"), ("GET", "/fr"),
     ("GET", "/robots.txt"), ("GET", "/sitemap.xml"), ("GET", "/favicon.svg"), ("GET", "/favicon.ico"),
     ("GET", "/favicon-32.png"), ("GET", "/apple-touch-icon.png"), ("GET", "/fonts/{name}"),
     ("GET", "/scarica-sonda"), ("GET", "/api/update-key"),

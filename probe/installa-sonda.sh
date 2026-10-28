@@ -9,7 +9,7 @@
 # Verifica il sistema, installa i pacchetti, chiede server, token, dispositivi e FRITZ!Box
 # (provandoli subito), avvia i servizi, controlla il primo invio al server e alla fine
 # mostra le informazioni da conservare.
-NETMON_VERSION="1.1.20261028-180000"
+NETMON_VERSION="1.1.20261028-190000"
 
 set -uo pipefail
 

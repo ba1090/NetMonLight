@@ -10,7 +10,7 @@
 # Verifica il sistema, installa i pacchetti, chiede le informazioni necessarie (dominio,
 # notifiche), prova email/Telegram/ntfy, configura HTTPS e alla fine mostra le informazioni
 # da conservare. Si può rilanciare quando si vuole: configurazione, account e storico restano.
-NETMON_VERSION="1.1.20261028-180000"
+NETMON_VERSION="1.1.20261028-190000"
 
 set -uo pipefail
 
@@ -66,7 +66,7 @@ run() {            # run "descrizione" comando... → output nel registro, error
 # ------------------------------------------------------------------ percorsi
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEST=/opt/netmon
-FILES=(app.py auth.py account.py mfa.py monitor.py notifier.py vmops.py brand.py fonts.py i18n.py i18n_admin.py privacy.html pkgcheck.py requirements.txt env.example netmon-server.service)
+FILES=(app.py auth.py account.py mfa.py monitor.py notifier.py vmops.py brand.py fonts.py sito.py i18n.py i18n_admin.py privacy.html pkgcheck.py requirements.txt env.example netmon-server.service)
 SUMMARY=/root/netmon-server-riepilogo.txt
 
 MODE=install
@@ -690,7 +690,8 @@ CHANNELS=$(printf '%s, ' "${channels[@]}"); CHANNELS=${CHANNELS%, }
 cat > "$SUMMARY" <<EOF
 netmon · server — informazioni da conservare ($(date '+%d/%m/%Y %H:%M'), versione $NETMON_VERSION)
 
-Pagina di stato ........ https://$DOMAIN
+Sito ................... https://$DOMAIN
+Dashboard utenti ....... https://$DOMAIN/dashboard
 Amministrazione ........ https://$DOMAIN/admin
 Chiave del server ...... $API_TOKEN
 Indirizzo per la sonda . https://$DOMAIN/api/report
@@ -718,7 +719,8 @@ line=$(printf '%.0s─' $(seq 1 66))
 printf '\n  %s┌%s┐%s\n' "$Y" "$line" "$N"
 printf '  %s│%s %-64s %s│%s\n' "$Y" "$N$B" "INFORMAZIONI DA SALVARE (es. nel gestore delle password)" "$N$Y" "$N"
 printf '  %s└%s┘%s\n' "$Y" "$line" "$N"
-printf '  Pagina di stato      %s%s%s\n' "$B" "https://$DOMAIN" "$N"
+printf '  Sito                 %s%s%s\n' "$B" "https://$DOMAIN" "$N"
+printf '  Dashboard utenti     %s%s%s\n' "$B" "https://$DOMAIN/dashboard" "$N"
 printf '  Amministrazione      %s%s%s\n' "$B" "https://$DOMAIN/admin" "$N"
 printf '  Chiave del server    %s%s%s%s\n' "$B$Y" "$API_TOKEN" "$N" "$([ "$NEW_KEY" = 0 ] && echo "  (invariata)")"
 printf '  Indirizzo sonda      %s\n' "https://$DOMAIN/api/report"
@@ -734,7 +736,7 @@ printf '\n  %sUna copia è in %s (leggibile solo da root).%s\n' "$D" "$SUMMARY" 
 cat <<EOF
 
   ${B}Prossimi passi${N}
-    1. Pagina di stato https://$DOMAIN: crea il tuo account (il primo si registra con la
+    1. Dashboard https://$DOMAIN/dashboard: crea il tuo account (il primo si registra con la
        chiave del server) e in ⚙ Impostazioni → Sonde → Aggiungi una sonda ricevi il token.
     2. Sulla sonda lancia:  sudo bash probe/installa-sonda.sh
     3. Amministrazione https://$DOMAIN/admin$([ -n "$ADMIN_PW" ] && echo ": accedi come $ADMIN_USER con la password

@@ -2,9 +2,11 @@
 
 Versione "light" di [NetMon](https://github.com/ba1090/NetMon): **una sola VM** fa tutto.
 
-- **Pagina di stato** (`https://dominio/status`): ogni utente vede le sue sonde, i dispositivi, gli
-  eventi e riceve i suoi avvisi (email, Telegram, ntfy).
-- **Pannello di amministrazione** (`https://dominio/admin`): amministratori, utenti, codici di accesso,
+- **Sito di presentazione** (`https://netmonhome.net/`, anche `/en/`, `/de/`, `/fr/`): la pagina pubblica
+  che spiega il servizio; *Accedi* porta alla dashboard.
+- **Dashboard degli utenti** (`https://netmonhome.net/dashboard`): ogni utente vede le sue sonde, i
+  dispositivi, gli eventi e riceve i suoi avvisi (email, Telegram, ntfy).
+- **Pannello di amministrazione** (`https://netmonhome.net/admin`): amministratori, utenti, codici di accesso,
   limiti e piani, elenco e aggiornamento delle sonde, stato e manutenzione della VM, aggiornamento di
   netmon con firma dell'autore e rollback.
 - **Sonde** (per esempio un Raspberry Pi a casa di ogni utente): fanno ping ai dispositivi, leggono il
@@ -15,8 +17,9 @@ Versione "light" di [NetMon](https://github.com/ba1090/NetMon): **una sola VM** 
 ┌───────────────────────┐   HTTPS   ┌──────────────────────────────────────┐
 │ Sonda utente A        │ ────────> │ VM unica (NetMon Light)              │
 ├───────────────────────┤           │  Caddy (HTTPS) → app.py              │
-│ Sonda utente B        │ ────────> │  /status  pagina di stato utenti     │
-└───────────────────────┘           │  /admin   pannello di amministrazione│
+│ Sonda utente B        │ ────────> │  /           sito di presentazione   │
+└───────────────────────┘           │  /dashboard  dashboard degli utenti  │
+                                    │  /admin      pannello amministrazione│
                                     │  avvisi: email / Telegram / ntfy     │
                                     └──────────────────────────────────────┘
 ```
@@ -26,6 +29,7 @@ Versione "light" di [NetMon](https://github.com/ba1090/NetMon): **una sola VM** 
 | NetMon | NetMon Light |
 |---|---|
 | Gateway con pagina d'accesso e orchestratore, più VM probe dietro | Una sola VM: niente gateway, niente orchestratore, niente VM probe |
+| Sito di presentazione su una macchina a parte (`netmon-sito`) | Sito servito dalla stessa VM su `/`; la dashboard è su `/dashboard` (`/status` ci rimanda) |
 | `installa-server.sh --orchestratore` / `--dietro-gateway` | Solo `installa-server.sh` (e `--aggiorna`) |
 | *Server › Tutte le VM*, barra delle macchine, colonna *VM* negli utenti | Tutto riferito all'unico server |
 | *Sposta su un'altra VM* | Resta *Esporta (file cifrato)* / *Importa un utente*, per passare da un server all'altro |

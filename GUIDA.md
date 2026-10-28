@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261028-180000*
+*Versione di netmon: 1.1.20261028-190000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -11,7 +11,7 @@ Telegram o ntfy quando qualcosa non risponde.
 ┌───────────────────────────┐          ┌──────────────────────────────┐
 │ Sonda (es. Raspberry Pi)  │  HTTPS   │ VM (server)                  │
 │  probe.py ── ping ──> LAN │ ───────> │  Caddy (HTTPS) → app.py      │
-│  config_web.py :8080      │ ogni 60s │  pagina di stato /status     │
+│  config_web.py :8080      │ ogni 60s │  dashboard /dashboard        │
 └───────────────────────────┘          │  alert: email/Telegram/ntfy  │
                                        └──────────────▲───────────────┘
                                                       │ controlla /health
@@ -185,7 +185,8 @@ Su Google Cloud l'installazione (anche `--aggiorna`) **toglie i pacchetti Google
 i metadati. Per tenerli tutti: `sudo NETMON_KEEP_GOOGLE=1 bash ~/netmon/server/installa-server.sh …`.
 
 **robots.txt e sitemap.xml** sono pubblici su ogni indirizzo (`https://dominio/sitemap.xml`). Elencano solo
-le pagine pubbliche: la pagina di stato e l'informativa. Pannello e API sono esclusi.
+le pagine pubbliche: il sito di presentazione (`/`, `/en/`, `/de/`, `/fr/`), la dashboard e l'informativa.
+Pannello e API sono esclusi.
 
 ### A2. Configura il DNS di netmonhome.net
 
@@ -229,6 +230,22 @@ primo account), indirizzo per la sonda, impronta della chiave degli aggiornament
 provvisoria dell'amministratore, salvati anche in `/root/netmon-server-riepilogo.txt`. Se lo
 rilanci su una VM già installata puoi scegliere tra **aggiornare i file** o **riconfigurare**
 dominio e notifiche: account, storico e chiave restano. Con `--aggiorna` aggiorna senza domande.
+
+### Indirizzi del server
+
+Tutto sta sullo stesso dominio (es. `netmonhome.net`):
+
+| Indirizzo | Cosa c'è |
+|---|---|
+| `https://netmonhome.net/` (e `/en/`, `/de/`, `/fr/`) | sito di presentazione: la pagina pubblica del servizio; *Accedi* porta alla dashboard |
+| `https://netmonhome.net/dashboard` | dashboard degli utenti (pagina di stato): accesso, registrazione con il codice, sonde e avvisi |
+| `https://netmonhome.net/admin` | pannello di amministrazione |
+| `https://netmonhome.net/privacy` | informativa sulla privacy |
+
+`/status`, l'indirizzo delle versioni precedenti, rimanda a `/dashboard` (anche i link già mandati per email).
+Il sito è in `server/sito.py`, creato da `python3 tools/importa-sito.py netmon-sito-<versione>.zip` a partire
+dallo zip del sito: per cambiarlo si rifà l'importazione con la pagina nuova e si alza la versione.
+Caratteri e icone del sito sono quelli di netmon.
 
 ### A4. Cosa installa lo script sulla VM
 
@@ -1369,7 +1386,7 @@ La voce **Stato sonda** del menu mostra, per ogni sonda, i dati inviati a ogni c
   aggiornamento*).
 
 Il pallino accanto al nome riassume lo stato: giallo o rosso se un valore è fuori norma.
-Il link `https://<dominio>/status#sonda` apre direttamente questa scheda.
+Il link `https://<dominio>/dashboard#sonda` apre direttamente questa scheda.
 Su Raspberry Pi l'alimentazione si legge con `vcgencmd`, tramite il gruppo `video` già impostato in
 `netmon-probe.service`; su altro hardware quella voce semplicemente non compare.
 

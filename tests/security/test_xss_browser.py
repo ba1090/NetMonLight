@@ -122,7 +122,7 @@ OPEN_ALL = "document.querySelectorAll('details').forEach(d => d.open = true)"
 
 def visit_user(page, srv, cookie, key=None):
     page.context.add_cookies([{"name": "netmon_session", "value": cookie, "url": srv.base}])
-    page.goto(srv.base + "/status")
+    page.goto(srv.base + "/dashboard")
     page.wait_for_function("document.querySelector('#page-net') !== null")
     page.wait_for_timeout(1500)
     for js in ["showPage('dash')", "showPage('net', true, 'fritzbox')", "showPage('net', true, 'sonde')",

@@ -7,8 +7,17 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 28 ottobre 2026 (1.1.20261028-180000 · 1 versione) — NetMon Light
+## 28 ottobre 2026 (1.1.20261028-190000 · 2 versioni) — NetMon Light
 
+- **Sito di presentazione sulla stessa VM**: la pagina pubblica di netmonhome.net (sito 1.0.20261024-231919) ora
+  la serve netmon su `/`, `/en/`, `/de/` e `/fr/`, con le sue intestazioni di sicurezza e la cache del browser;
+  *Accedi* e *Privacy* portano a `/dashboard` e `/privacy` dello stesso dominio. Le pagine stanno in
+  `server/sito.py`, creato da `tools/importa-sito.py` a partire dallo zip del sito, e si aggiornano con
+  netmon (pannello o `--aggiorna`, rollback compreso). `robots.txt` e `sitemap.xml` comprendono le quattro
+  lingue. *Server, sito.*
+- **Dashboard degli utenti su `/dashboard`**: la pagina di stato si apre da `/dashboard`; `/status` rimanda lì
+  (anche i link d'invito e di conferma già mandati per email). Inviti, conferme e *scarica la sonda* portano a
+  `/dashboard`. Il pannello resta su `/admin`. *Server, documenti.*
 Allineata a NetMon 1.1.20261028-173944: le novità di NetMon dal 27 ottobre sera, senza le parti per più VM.
 
 - **Pulsanti sempre leggibili**: controllati uno per uno (pagina utente, pannello, pagina locale della sonda; tema chiaro e scuro; computer e telefono; normale e al passaggio del mouse) misurando il

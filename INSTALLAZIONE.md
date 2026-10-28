@@ -1,4 +1,4 @@
-# NetMon Light 1.1.20261028-180000 — installazione e aggiornamento
+# NetMon Light 1.1.20261028-190000 — installazione e aggiornamento
 
 Istruzioni rapide per la VM (una sola: pagina di stato, pannello di amministrazione, utenti e sonde)
 e per la sonda (es. Raspberry Pi). Per una installazione nuova vai al **Caso 3**. I dettagli e la risoluzione
@@ -73,7 +73,7 @@ da una 1.x, oppure se il pannello non funziona. Prima la VM, poi ogni sonda.
 
 3. Alla fine controlla:
    - la riga **«Impronta della chiave degli aggiornamenti: xxxx xxxx xxxx xxxx»** — annotala;
-   - `Aggiornamento completato: versione <quella che avevi> → 1.1.20261028-180000`.
+   - `Aggiornamento completato: versione <quella che avevi> → 1.1.20261028-190000`.
 4. Ricarica la pagina di stato nel browser.
 
 Account, storico, sonde e chiave del server restano. Un aggiornamento a mano chiude l'eventuale
@@ -127,7 +127,7 @@ bot Telegram, se attivare il firewall, e email e nome del primo amministratore. 
 
 Poi, dal browser:
 
-1. `https://TUO-DOMINIO` → *Primo accesso*: inserisci la **chiave del server**, la tua email e una
+1. `https://TUO-DOMINIO/dashboard` → *Primo accesso*: inserisci la **chiave del server**, la tua email e una
    password: è il tuo account.
 2. **Impostazioni → Sonde → Aggiungi una sonda**: scegli il nome e copia il **token** (`sonda_…`, si
    vede una volta sola). Sotto c'è anche l'**indirizzo del server** a cui la sonda deve puntare.
@@ -194,9 +194,9 @@ utenti di un'installazione NetMon con più VM:
 
 | Controllo | Cosa devi vedere |
 |---|---|
-| `https://TUO-DOMINIO/health` | `{"ok":true,"version":"1.1.20261028-180000",...}` |
+| `https://TUO-DOMINIO/health` | `{"ok":true,"version":"1.1.20261028-190000",...}` |
 | Pagina di stato | la sonda compare in *Stato rete › Monitor dispositivi* entro un minuto, pallino verde |
-| *Stato sonda* → versione | `1.1.20261028-180000`, senza scritta gialla |
+| *Stato sonda* → versione | `1.1.20261028-190000`, senza scritta gialla |
 | `http://IP_DELLA_SONDA:8080` | il browser chiede la password; a sinistra il menu delle sezioni; in *Server* il token appare come `••••••••`, **Mostra** lo rivela |
 | Alert di prova | aggiungi un dispositivo inesistente (es. `test: 192.168.1.254`): dopo circa 3 minuti arriva l'avviso; poi rimuovilo |
 | Sulla sonda | `ls /usr/local/share/netmon/update-key.pub` esiste |

@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261028-180000
+# netmon versione 1.1.20261028-190000
 # netmon · permessi della sonda (utente netprobe): solo riavvio, aggiornamento del sistema e di netmon (anche da pacchetto caricato), reti Wi-Fi e disinstallazione, nient'altro.
 # Installazione:  sudo install -m 440 -o root -g root sudoers-netprobe /etc/sudoers.d/netprobe
 #                 sudo visudo -c        (deve rispondere "parsed OK")
