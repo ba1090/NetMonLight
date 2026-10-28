@@ -10,7 +10,7 @@
 # Verifica il sistema, installa i pacchetti, chiede le informazioni necessarie (dominio,
 # notifiche), prova email/Telegram/ntfy, configura HTTPS e alla fine mostra le informazioni
 # da conservare. Si può rilanciare quando si vuole: configurazione, account e storico restano.
-NETMON_VERSION="1.1.20261027-171600"
+NETMON_VERSION="1.1.20261028-180000"
 
 set -uo pipefail
 
@@ -222,7 +222,7 @@ install_files() {
     if python3 - "$HERE/.." "$DEST/probe-dist/netmon.zip" >> "$LOG" 2>&1 <<'EOF'
 import os, stat, sys, zipfile
 src, out = os.path.realpath(sys.argv[1]), sys.argv[2]
-top = ["VERSION", "CHANGELOG.md", "GUIDA.md", "INSTALLAZIONE.md", "server", "probe", "tools"]
+top = ["VERSION", "probe"]          # alla sonda serve solo questo: niente server, strumenti o documenti
 files = []
 for t in top:
     p = os.path.join(src, t)

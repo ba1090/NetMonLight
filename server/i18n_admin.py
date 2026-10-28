@@ -3,7 +3,7 @@ francese). Stesso formato di TRANSLATIONS in i18n.py: chiave il testo italiano, 
 Stanno a parte perché la pagina utente non le carica (sono solo per il pannello e i suoi avvisi).
 Per i testi nuovi: python3 tools/i18n-estrai.py admin --mancanti
 """
-__version__ = "1.1.20261027-171600"
+__version__ = "1.1.20261028-180000"
 
 ADMIN_TRANSLATIONS = {
     "en": {
@@ -2769,3 +2769,12 @@ for _it, _tr in _LIGHT.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
 del _LIGHT, _it, _tr, _lang, _text
+
+
+for _it, _tr in {
+    "· {0} non risponde": ("· {0} not responding", "· {0} antwortet nicht", "· {0} ne répond pas"),
+    "· 1 non risponde": ("· 1 not responding", "· 1 antwortet nicht", "· 1 ne répond pas"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text

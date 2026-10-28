@@ -58,4 +58,7 @@ sudo bash ~/netmon/server/installa-server.sh
 
 Poi, sulla sonda, `sudo bash ~/netmon/probe/installa-sonda.sh` (dettagli in `INSTALLAZIONE.md`).
 
+Lo zip contiene solo `VERSION`, `server/` e `probe/`: documenti, test e strumenti (*Firma NetMon*) stanno
+in questo repository.
+
 Versione attuale: vedi il file [`VERSION`](VERSION).

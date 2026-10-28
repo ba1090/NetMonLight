@@ -22,5 +22,12 @@ python tests/stress/stress.py sustained --seconds 7200 --out /tmp/netmon-stress 
 | `security/test_ssrf.py` | gli indirizzi ntfy scelti dagli utenti non portano il server sulla rete interna |
 | `security/test_resources.py` | ogni richiesta chiude le sue connessioni al database |
 | `test_managed.py` | sonda gestita da un altro sistema (`NETMON_MANAGED_BY`): dice dove fare riavvio, aggiornamenti e reti Wi-Fi invece di consigliare sudo; il server non le manda comandi (pagina, programmati, automatici) e la segna nel pannello |
+| `test_netdev.py` | *Dispositivi in rete*: la sonda unisce elenco del FRITZ!Box e mappa mesh senza mandare i MAC; il server pulisce i campi, li tiene tra un report e l'altro, ricorda «visto … fa» per ogni account |
+| `scenarios/test_availability.py` | Dashboard → *Disponibilità*: caselle allineate all'ora del browser, ping risposti e persi, solo le sonde dell'account |
+| `scenarios/test_dst.py` | cambio dell'ora legale: gli speedtest periodici restano all'ora scelta |
+| `scenarios/test_notify_channels.py` | interruttori dei canali (Email, Telegram, ntfy) e topic ntfy proposto |
+| `scenarios/test_transfer_crypto.py` | export cifrato degli utenti: si apre solo con la sua password, un file modificato viene rifiutato, gli zip in chiaro delle versioni di prima si importano ancora |
+| `scenarios/test_restart_grace.py` | 5 minuti di tolleranza dopo aggiornamento o ripartenza della sonda: «in ripartenza» invece di «in ritardo», poi le soglie di sempre |
+| `scenarios/test_portcheck.py` | porte provate quando il ping fallisce: solo per i dispositivi scelti e con le porte dell'ultimo controllo; una porta che risponde evita l'avviso, una mai vista aperta no; la sonda prova solo la rete di casa |
 | `scenarios/test_usecases.py` | dall'account con 0 sonde a quello con 50 sonde, 1000 dispositivi e 10 FRITZ!Box; piani basso/medio/alto |
 | `stress/` | carico realistico e prolungato, raffiche di accessi, corpi enormi, ritorno in massa delle sonde, storico di 30 giorni |

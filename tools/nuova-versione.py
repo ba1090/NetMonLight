@@ -10,7 +10,8 @@ in tutti i file del pacchetto. Non usa espressioni regolari sui sorgenti: così 
 modificare per errore il codice (com'era successo alle regex della versione in app.py).
 Alla fine controlla che server e sonda si compilino, che tutti i file abbiano la stessa versione
 e crea SEMPRE lo zip ../netmon-light-<versione>.zip, verificato con pkgcheck (sotto netmon/, sotto i
-10 MB, meno di 300 file, senza .DS_Store, __pycache__ o *.pyc).
+10 MB, meno di 300 file, senza .DS_Store, __pycache__ o *.pyc). Lo zip contiene solo VERSION,
+server/ e probe/, senza documenti (.md): test, strumenti e guide restano nel repository.
 
 OGNI zip porta la sua versione: a ogni modifica, anche di un solo carattere, si alza la
 versione. La stessa versione non viene mai re-zipata (il pannello la rifiuterebbe: accetta solo
@@ -35,6 +36,9 @@ PKGCHECK = ROOT / "server" / "pkgcheck.py"
 ZIP_OUT = ROOT.parent                       # zip accanto alla cartella netmon
 SKIP_DIRS = {".git", "__pycache__", "venv", ".hypothesis", ".pytest_cache"}   # cache dei test
 SKIP_FILES = {"CHANGELOG.md"}                  # lo storico conserva le versioni passate
+# Nello zip va solo ciò che serve per installare e aggiornare la VM e le sonde. Documenti,
+# test e strumenti (tools/: «Firma NetMon», questo script) restano nel repository.
+ZIP_TOP = {"VERSION", "server", "probe"}
 TEXT_EXT = {".py", ".sh", ".md", ".txt", ".service", ".socket", ".example", ""}
 
 
@@ -46,7 +50,7 @@ def build_zip(version: str, problems: list[str]) -> Path:
         if not path.is_file():
             continue
         rel = path.relative_to(ROOT)
-        if SKIP_DIRS & set(rel.parts):
+        if SKIP_DIRS & set(rel.parts) or rel.parts[0] not in ZIP_TOP or path.suffix == ".md":
             continue
         # gli eseguibili di «Firma NetMon» restano nel repository: nel pacchetto sarebbero un peso inutile per
         # VM e sonde (l'app per il Mac nello zip usa le finestre di sistema)

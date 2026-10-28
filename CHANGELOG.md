@@ -7,6 +7,55 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
+## 28 ottobre 2026 (1.1.20261028-180000 · 1 versione) — NetMon Light
+
+Allineata a NetMon 1.1.20261028-173944: le novità di NetMon dal 27 ottobre sera, senza le parti per più VM.
+
+- **Pulsanti sempre leggibili**: controllati uno per uno (pagina utente, pannello, pagina locale della sonda; tema chiaro e scuro; computer e telefono; normale e al passaggio del mouse) misurando il
+  contrasto tra scritta e sfondo. Corretti i pulsanti selezionati in tema scuro (filtri di *Monitor dispositivi*
+  e *Dispositivi in rete*, periodo della *Disponibilità*, dimensione dei riquadri della Dashboard), che avevano la
+  scritta bianca su azzurro chiaro; il filtro *Segnale debole* e lo scudo giallo (rischio medio), poco leggibili
+  su bianco. Ora ogni scritta di pulsante ha un contrasto di
+  almeno 4,5:1 e ogni icona di almeno 3:1. *Pagina utente.*
+- **«Salva ordine» più visibile**: i pulsanti principali della barra in alto (*Salva ordine* di *⇅ Ordine* e della
+  Dashboard) hanno la scritta in grassetto e un alone chiaro; passandoci sopra restano pieni (prima lo sfondo
+  diventava trasparente e la scritta blu scuro spariva sulla barra). *Pagina utente.*
+- **Un solo «⇅ Ordine» per sezioni e dispositivi**: tolta la voce *Riordina i dispositivi* dal menu *Modifica ▾*
+  delle sonde. In *Stato rete › Monitor dispositivi* il pulsante **⇅ Ordine** in alto lascia le sezioni aperte e
+  dà le frecce ▲▼ anche a ogni dispositivo: **Salva ordine** salva insieme l'ordine delle sonde e quello dei
+  dispositivi. In *› FRITZ!Box* resta com'era (solo le sezioni). *Pagina utente.*
+- **«1 non risponde»** invece di «1 non rispondono» nel riepilogo della mappa. *Pagina utente.*
+- **Controllo approfondito delle porte per i dispositivi nuovi**, scelto dispositivo per dispositivo: nella
+  finestra *Dispositivi* ogni riga aggiunta (anche con *+ Monitora*) ha la sua casella, spenta, *Controllo
+  approfondito delle porte dopo il salvataggio*: salvando, la sonda controlla solo i dispositivi spuntati
+  (uno alla volta, gli altri in coda).
+  *Pagina utente.*
+- **Porte aperte quando il ping fallisce**: nella finestra dello scudo 🛡, per i dispositivi scelti (spento
+  all'inizio), *Se il ping fallisce, prova le porte aperte*: quando il ping non risponde la sonda prova le
+  porte trovate aperte dall'ultimo controllo (le prime 5). Se una risponde il dispositivo è acceso: giallo con
+  «non risponde al ping, porta 80 aperta» e nessun avviso; altrimenti conta come un ping fallito. Solo rete di
+  casa, al massimo 8 secondi per giro. Serve la sonda aggiornata. *Sonda, pagina utente, server.*
+- **5 minuti di tolleranza dopo un aggiornamento o una ripartenza della sonda**: dopo che la sonda ha
+  confermato un aggiornamento o un riavvio, e dopo ogni ripartenza del suo programma (anche aggiornata a mano o
+  al ritorno della corrente), per 5 minuti non risulta «in ritardo» e l'avviso «non comunica» non parte. I primi
+  cicli dopo l'avvio sono i più lenti, soprattutto su un Raspberry Pi Zero, e facevano comparire ritardi inutili.
+  La pagina scrive *in ripartenza dopo l'aggiornamento*. Una sonda che non torna davvero viene segnalata al
+  più 5 minuti più tardi del solito. *Server.*
+- **Documentazione allineata**: GUIDA, INSTALLAZIONE e README dicono cosa contiene ora lo zip (e che *Firma NetMon*
+  si prende dal repository), la tolleranza dopo gli aggiornamenti e le nuove prove automatiche.
+- **Pacchetti più leggeri**: lo zip del rilascio contiene solo ciò che serve a installare e aggiornare la
+  VM e le sonde (`VERSION`, `server/`, `probe/`): test, strumenti (*Firma NetMon*, script di
+  rilascio) e documenti restano nel repository. Da 1,4 a 1,0 MB. Il pacchetto completo che la VM prepara
+  per le sonde contiene solo `VERSION` e `probe/`: da circa 1,1 MB a 250 KB, e la sonda non scarica né
+  controlla più il codice del server (su un Raspberry Pi Zero erano secondi di processore pieno durante
+  l'aggiornamento). *Server, rilascio.*
+- **La pagina non torna più in cima a ogni aggiornamento**: in *Stato rete › Monitor dispositivi* e
+  *› FRITZ!Box* l'aggiornamento automatico (ogni 15 secondi) ricostruiva le sezioni e riportava la pagina
+  all'inizio. Ora resta dov'eri; anche la ricerca di *Dispositivi in rete* tiene il cursore mentre scrivi.
+  *Pagina utente.*
+- **Dispositivi in rete richiudibile**: come gli altri riquadri si chiude con la freccia accanto al titolo (da
+  chiusa resta il numero dei collegati). *Pagina utente.*
+
 ## 27 ottobre 2026 (1.1.20261027-171600 · 3 versioni) — NetMon Light
 
 - **Zip del rilascio `netmon-light-<versione>.zip`**: `tools/nuova-versione.py` crea lo zip con il nome di NetMon Light (prima `netmon-<versione>.zip`); dentro resta la cartella `netmon/`, quindi installazione e aggiornamento non cambiano. *Strumenti, documenti.*
@@ -35,7 +84,7 @@ giorno e quante ne sono uscite.
   *Esportare e importare un utente* e *Cambiare dominio*; tolto il capitolo sulle più VM); informativa sulla
   privacy con un solo server. *Documenti, informativa.*
 
-## 26 ottobre 2026 (1.1.20261026-104239 · 3 versioni)
+## 26 ottobre 2026 (1.1.20261027-171600 · 3 versioni)
 
 - **Trasferimento degli utenti cifrato con una password**: *Utenti → Esporta (file cifrato)* chiede una password
   del file (almeno 12 caratteri, con indicatore di robustezza; *Genera* propone sei parole a caso, *Copia* la
@@ -58,7 +107,7 @@ giorno e quante ne sono uscite.
   italiano). *Pagina utente, pannello, sonda, server.*
 - **Pagina locale della sonda: stesso traduttore del server**: la copia del traduttore nella pagina della
   sonda non era stata aggiornata insieme a quella del server, e lo script di rilascio si era fermato (pacchetto
-  1.1.20261026-090206 da non usare). Ora sono di nuovo identiche. *Sonda.*
+  1.1.20261027-171600 da non usare). Ora sono di nuovo identiche. *Sonda.*
 
 ## 25 ottobre 2026 (1.1.20261025-142050 · 2 versioni)
 

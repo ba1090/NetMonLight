@@ -2,7 +2,7 @@
 
 File generato da tools/genera-icone.py: non modificarlo a mano (cambia il disegno là e rilancialo).
 """
-__version__ = "1.1.20261027-171600"
+__version__ = "1.1.20261028-180000"
 import base64
 
 LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#174A72"/><path d="M32.00 12.00L49.32 22.00L49.32 42.00L32.00 52.00L14.68 42.00L14.68 22.00Z" fill="none" stroke="#FFFFFF" stroke-opacity=".45" stroke-width="1.8" stroke-linejoin="round"/><path d="M32 32L32.00 12.00M32 32L49.32 22.00M32 32L49.32 42.00M32 32L32.00 52.00M32 32L14.68 42.00M32 32L14.68 22.00" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/><circle cx="32.00" cy="12.00" r="4" fill="#FFFFFF"/><circle cx="49.32" cy="22.00" r="4" fill="#FFFFFF"/><circle cx="49.32" cy="42.00" r="4" fill="#FFFFFF"/><circle cx="32.00" cy="52.00" r="4" fill="#FFFFFF"/><circle cx="14.68" cy="42.00" r="4" fill="#FFFFFF"/><circle cx="14.68" cy="22.00" r="4" fill="#FFFFFF"/><circle cx="32" cy="32" r="9.00" fill="#174A72"/><path d="M32.00 24.50L24.00 31.50L26.60 31.50L26.60 39.00L37.40 39.00L37.40 31.50L40.00 31.50Z" fill="#7FB8E0" stroke="#7FB8E0" stroke-width="1.50" stroke-linejoin="round"/></svg>'

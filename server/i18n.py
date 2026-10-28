@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261027-171600"
+__version__ = "1.1.20261028-180000"
 import json
 import re
 
@@ -4863,6 +4863,44 @@ for _it, _tr in {
     "✓ monitorato": ("✓ monitored", "✓ überwacht", "✓ surveillé"),
     "+ Monitora": ("+ Monitor", "+ Überwachen", "+ Surveiller"),
     "via {0}": ("via {0}", "über {0}", "via {0}"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+
+# Sonda appena ripartita (dopo un aggiornamento o un riavvio): minuti di tolleranza
+for _it, _tr in {
+    "in ripartenza dopo l'aggiornamento, ultimo report {0} fa": ("restarting after the update, last report {0} ago", "startet nach dem Update neu, letzter Bericht vor {0}", "redémarre après la mise à jour, dernier rapport il y a {0}"),
+    "in ripartenza, ultimo report {0} fa": ("restarting, last report {0} ago", "startet neu, letzter Bericht vor {0}", "redémarre, dernier rapport il y a {0}"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+
+# Porte dei dispositivi: controllo approfondito all'aggiunta e prova delle porte quando il ping fallisce
+for _it, _tr in {
+    "Controllo approfondito delle porte dopo il salvataggio (fino a 15 minuti)": ("Thorough port check after saving (up to 15 minutes)", "Gründliche Portprüfung nach dem Speichern (bis zu 15 Minuten)", "Contrôle approfondi des ports après l'enregistrement (jusqu'à 15 minutes)"),
+    "Controllo approfondito chiesto per {0}: l'esito arriva negli eventi e nello scudo 🛡.": ("Thorough check requested for {0}: the result arrives in the events and in the shield 🛡.", "Gründliche Prüfung für {0} angefordert: das Ergebnis erscheint in den Ereignissen und im Schild 🛡.", "Contrôle approfondi demandé pour {0} : le résultat arrive dans les événements et dans le bouclier 🛡."),
+    "Controllo approfondito non partito: {0}": ("Thorough check not started: {0}", "Gründliche Prüfung nicht gestartet: {0}", "Contrôle approfondi non lancé : {0}"),
+    "Se il ping fallisce, prova le porte aperte": ("If ping fails, try the open ports", "Wenn der Ping fehlschlägt, die offenen Ports prüfen", "Si le ping échoue, essayer les ports ouverts"),
+    "Prova la porta {0}: se risponde, il dispositivo è acceso e non parte l'avviso (giallo nella pagina).": ("Tries port {0}: if it answers, the device is on and no alert is sent (yellow on the page).", "Prüft Port {0}: antwortet er, ist das Gerät an und es gibt keine Warnung (gelb auf der Seite).", "Essaie le port {0} : s'il répond, l'appareil est allumé et aucune alerte ne part (jaune sur la page)."),
+    "Prova le porte {0}: se una risponde, il dispositivo è acceso e non parte l'avviso (giallo nella pagina).": ("Tries ports {0}: if one answers, the device is on and no alert is sent (yellow on the page).", "Prüft die Ports {0}: antwortet einer, ist das Gerät an und es gibt keine Warnung (gelb auf der Seite).", "Essaie les ports {0} : si l'un répond, l'appareil est allumé et aucune alerte ne part (jaune sur la page)."),
+    "Serve prima un controllo che trovi almeno una porta aperta.": ("First you need a check that finds at least one open port.", "Zuerst braucht es eine Prüfung, die mindestens einen offenen Port findet.", "Il faut d'abord un contrôle qui trouve au moins un port ouvert."),
+    "Serve prima un controllo di sicurezza che trovi almeno una porta aperta.": ("First you need a security check that finds at least one open port.", "Zuerst braucht es eine Sicherheitsprüfung, die mindestens einen offenen Port findet.", "Il faut d'abord un contrôle de sécurité qui trouve au moins un port ouvert."),
+    "Prova delle porte attiva.": ("Port check on.", "Portprüfung aktiv.", "Essai des ports activé."),
+    "Prova delle porte tolta.": ("Port check off.", "Portprüfung entfernt.", "Essai des ports retiré."),
+    "Troppi dispositivi con la prova delle porte.": ("Too many devices with the port check.", "Zu viele Geräte mit Portprüfung.", "Trop d'appareils avec l'essai des ports."),
+    "non risponde al ping, porta {0} aperta": ("no ping reply, port {0} open", "antwortet nicht auf Ping, Port {0} offen", "ne répond pas au ping, port {0} ouvert"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+
+for _it, _tr in {
+    "Cambia l'ordine di riquadri e dispositivi": ("Change the order of panels and devices", "Reihenfolge von Kästen und Geräten ändern", "Changer l'ordre des cadres et des appareils"),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)

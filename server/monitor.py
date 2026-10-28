@@ -13,7 +13,7 @@ senza esserne avvisati.
 
 Nessuna dipendenza esterna: si può testare da sola.
 """
-__version__ = "1.1.20261027-171600"
+__version__ = "1.1.20261028-180000"
 import time
 from dataclasses import dataclass
 
@@ -23,6 +23,12 @@ PRIORITIES = ("alta", "normale", "bassa", "mai")
 NORMAL_PRIORITY = "normale"
 LOW_FACTOR_DEFAULT = 2          # priorità bassa: il doppio dei controlli della normale
 LOW_FACTOR_MAX = 10
+# Dopo un aggiornamento, un riavvio o comunque una ripartenza del programma della sonda: per
+# questi secondi non si dice «in ritardo» né «non comunica». I primi cicli dopo l'avvio sono i più
+# lenti (primo collegamento al FRITZ!Box, mappa mesh, elenco dei dispositivi), soprattutto su un
+# Raspberry Pi Zero. Il silenzio si conta dall'ultimo report, quindi la finestra non nasconde mai
+# più di questi 5 minuti.
+RESTART_GRACE = 300
 
 
 @dataclass
@@ -81,10 +87,26 @@ class Monitor:
         s = p.get("system") or {}
         return "zero" in str(s.get("model") or "").lower() or (isinstance(s.get("cpus"), int) and s["cpus"] <= 1)
 
+    @staticmethod
+    def restart_reason(p, now=None):
+        """"update" nei 5 minuti dopo un aggiornamento (o riavvio) chiesto alla sonda e completato,
+        "restart" nei 5 minuti dopo una ripartenza qualsiasi del programma della sonda, altrimenti None."""
+        now = now or time.time()
+        c = p.get("command") or {}
+        if (c.get("cmd") in ("update", "upgrade", "reboot") and c.get("state") == "done"
+                and 0 <= now - float(c.get("done_at") or 0) < RESTART_GRACE):
+            return "update"
+        if 0 <= now - float(p.get("restart_at") or 0) < RESTART_GRACE:
+            return "restart"
+        return None
+
     def update_grace(self, p, now=None) -> float:
         """Durante un aggiornamento (o un riavvio) chiesto alla sonda: un ciclo in più prima di dirla in
         ritardo o irraggiungibile, due sull'hardware lento. La sonda si ferma per installare e ripartire,
-        e su un Raspberry Pi Zero la ripartenza da sola può durare più di un ciclo."""
+        e su un Raspberry Pi Zero la ripartenza da sola può durare più di un ciclo. Dopo, per
+        RESTART_GRACE secondi (vedi restart_reason), lo sconto copre i primi cicli lenti."""
+        if self.restart_reason(p, now):
+            return RESTART_GRACE
         c = p.get("command") or {}
         if c.get("cmd") not in ("update", "upgrade", "reboot") or c.get("state") not in ("pending", "running"):
             return 0

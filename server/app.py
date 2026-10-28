@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261027-171600"
+__version__ = "1.1.20261028-180000"
 VERSION = __version__
 import asyncio
 import base64
@@ -44,7 +44,7 @@ import brand
 import fonts
 import i18n
 import mfa
-from monitor import Alert, Monitor, fmt_duration, label_of
+from monitor import RESTART_GRACE, Alert, Monitor, fmt_duration, label_of
 import notifier
 from notifier import (UnsafeUrl, allowed, check_public_https, notify, send_email, send_ntfy, send_telegram,
                       smtp_value, telegram_bot_name)
@@ -112,6 +112,8 @@ class DeviceInfo(BaseModel):
     host: Optional[str] = Field(default=None, max_length=253)
     # con i limiti NaN e infinito sono rifiutati: non sono JSON valido e farebbero fallire le risposte
     rtt: Optional[float] = Field(default=None, ge=0, le=3_600_000)
+    # ping fallito, ma una delle porte trovate aperte dall'ultimo controllo di sicurezza risponde
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
 
 
 # \Z e non $: $ accetta anche un a capo finale («router\n»)
@@ -1038,6 +1040,8 @@ def apply_command_status(probe, p, st):
     c["output"] = str(st.get("output") or "")[:4000]
     c["finished"] = finite(st.get("finished"))      # solo un orario: finisce anche nel pannello /admin
     c["reboot_required"] = bool(st.get("reboot_required"))
+    if state == "done" and not c.get("done_at"):
+        c["done_at"] = time.time()                  # ora del server: da qui i minuti di tolleranza
     event = None
     if state in ("done", "error") and not c.get("logged"):
         c["logged"] = True
@@ -1322,6 +1326,7 @@ SCAN_DAILY = 86400            # controllo automatico: una volta al giorno
 SCAN_RISKS = ("alta", "media", "bassa", "info")
 SCAN_MODES = ("veloce", "standard", "approfondito")
 SCAN_QUEUE_MAX = 20           # controlli in coda per sonda, dopo quello in corso
+PORTCHECK_PORTS = 5           # porte provate quando il ping fallisce (dall'ultimo controllo riuscito)
 _scans = {}
 
 
@@ -1348,7 +1353,23 @@ def scan_entry(key):
     e.setdefault("last", {})
     e.setdefault("req", None)
     e.setdefault("queue", [])
+    e.setdefault("portcheck", [])
     return e
+
+
+def port_check_for(key, p=None):
+    """{dispositivo: porte} da provare quando il ping fallisce: solo i dispositivi scelti, con le porte
+    trovate aperte dall'ultimo controllo di sicurezza riuscito (le prime PORTCHECK_PORTS)."""
+    e = _scans.get(key) or {}
+    p = p or monitor.state.get(key) or {}
+    hosts = (p.get("config") or {}).get("devices") or {}
+    out = {}
+    for dev in e.get("portcheck") or []:
+        last = (e.get("last") or {}).get(dev) or {}
+        ports = [f["port"] for f in last.get("ports") or []] if last.get("ok") else []
+        if dev in hosts and ports:
+            out[dev] = ports[:PORTCHECK_PORTS]
+    return out
 
 
 def scan_next(key):
@@ -1487,7 +1508,8 @@ def scans_public(key):
         last[dev] = {k: r.get(k) for k in ("finished", "ok", "error", "host", "ip", "ports", "complete", "mode")}
         last[dev]["worst"] = next((k for k in SCAN_RISKS if any(f["risk"] == k for f in ports)), None)
     req = e.get("req") or {}
-    return {"daily": e.get("daily") or [], "pending": req.get("device"), "pending_mode": req.get("mode"),
+    return {"daily": e.get("daily") or [], "portcheck": e.get("portcheck") or [],
+            "pending": req.get("device"), "pending_mode": req.get("mode"),
             "queue": [{"device": q["device"], "mode": q.get("mode")} for q in e.get("queue") or []], "last": last}
 
 
@@ -2342,7 +2364,11 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
         tenuti = {str(b.get("id") or "") for b in r.fritz_boxes}
         if r.traffic_more:
             r.traffic_more = {k: v for k, v in r.traffic_more.items() if k in tenuti}
-    status = {n: (v if isinstance(v, bool) else v.ok) for n, v in misure.items()}
+    # ping fallito ma una porta già vista aperta risponde: il dispositivo è acceso, niente avviso
+    porte = port_check_for(key)
+    porta_ok = {n: v.port for n, v in misure.items()
+                if not isinstance(v, bool) and not v.ok and v.port in porte.get(n, ())}
+    status = {n: (v if isinstance(v, bool) else v.ok or n in porta_ok) for n, v in misure.items()}
     async with lock:
         alerts = monitor.process_report(key, status, time.time(), r.interval,
                                         r.thresholds.model_dump() if r.thresholds else None)
@@ -2351,6 +2377,7 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
             if not isinstance(v, bool) and name in devices:
                 devices[name]["host"] = v.host
                 devices[name]["rtt"] = v.rtt if v.ok else None
+                devices[name]["port_ok"] = porta_ok.get(name)
         # Scambio della configurazione: vince la revisione più alta
         p = monitor.state[key]
         if not p.get("name"):
@@ -2392,6 +2419,11 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
         if r.system is not None:
             p["system"] = clean_system(r.system)
             p["system"]["ts"] = time.time()
+            # programma della sonda appena ripartito (aggiornato a mano, riavviato, corrente tornata):
+            # i primi cicli sono lenti, si concedono alcuni minuti prima di dirla in ritardo
+            pu = finite(p["system"].get("probe_uptime"))
+            if pu is not None and 0 <= pu < RESTART_GRACE:
+                p["restart_at"] = time.time() - pu
         # La parte dei limiti dell'account che spetta a questa sonda cambia anche quando cambiano le
         # altre sonde: se è diversa da quella mandata l'ultima volta, la configurazione riparte.
         firma = [*probe_caps(al), sorted(fuori - set(in_pausa or ()))]
@@ -2498,6 +2530,8 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
         reply["scan_ack"] = scan_ack
     if scan := pending_scan(key):
         reply["scan"] = scan
+    if porte:
+        reply["port_check"] = porte
     return reply
 
 
@@ -6760,6 +6794,11 @@ async def api_status(user: dict = Depends(ui_user), events: int = EVENTS_SHOWN, 
             pstate, ptext = "bad", f"offline da {fmt_duration(now - (p.get('offline_since') or p['last_seen']))}"
         elif silence > monitor.stale_after(p):
             pstate, ptext = "warn", f"in ritardo, ultimo report {fmt_duration(silence)} fa"
+        elif monitor.restart_reason(p, now) and silence > monitor.stale_after(p, now) - RESTART_GRACE:
+            pstate = "ok"
+            ptext = (f"in ripartenza dopo l'aggiornamento, ultimo report {fmt_duration(silence)} fa"
+                     if monitor.restart_reason(p, now) == "update"
+                     else f"in ripartenza, ultimo report {fmt_duration(silence)} fa")
         else:
             pstate, ptext = "ok", f"ultimo report {fmt_duration(silence)} fa"
         devices = []
@@ -6769,6 +6808,8 @@ async def api_status(user: dict = Depends(ui_user), events: int = EVENTS_SHOWN, 
                 dstate, dtext = "warn", "stato sconosciuto"
             elif d["down"]:
                 dstate, dtext = "bad", f"giù da {fmt_duration(now - d['since'])}"
+            elif d.get("port_ok"):
+                dstate, dtext = "warn", f"non risponde al ping, porta {d['port_ok']} aperta"
             elif d["fails"]:
                 dstate, dtext = "warn", f"{d['fails']} ping falliti"
             else:
@@ -7472,6 +7513,10 @@ class ScanDailyBody(ScanBody):
     daily: bool
 
 
+class ScanPortcheckBody(ScanBody):
+    on: bool
+
+
 class ScanRunBody(ScanBody):
     mode: Literal["veloce", "standard", "approfondito"] = "standard"
 
@@ -7543,6 +7588,30 @@ async def api_probe_scan_daily(b: ScanDailyBody, user: dict = Depends(ui_user)):
         e["daily"] = daily
         scans_save()
     return {"ok": True, "daily": b.daily}
+
+
+@app.post("/api/probe-scan-portcheck")
+async def api_probe_scan_portcheck(b: ScanPortcheckBody, user: dict = Depends(ui_user)):
+    """Quando il ping di questo dispositivo fallisce, la sonda prova le porte trovate aperte
+    dall'ultimo controllo di sicurezza: se una risponde il dispositivo è acceso (niente avviso)."""
+    owns(user, b.probe)
+    async with lock:
+        p = monitor.state.get(b.probe)
+        if p is None:
+            raise HTTPException(status_code=404, detail="sonda non trovata")
+        scan_device_host(p, b.device)
+        e = scan_entry(b.probe)
+        last = e["last"].get(b.device) or {}
+        if b.on and not (last.get("ok") and last.get("ports")):
+            raise HTTPException(status_code=409, detail="Serve prima un controllo di sicurezza che trovi almeno una porta aperta.")
+        lst = [d for d in e["portcheck"] if d != b.device]
+        if b.on:
+            if len(lst) >= MAX_DEVICES:
+                raise HTTPException(status_code=409, detail="Troppi dispositivi con la prova delle porte.")
+            lst.append(b.device)
+        e["portcheck"] = lst
+        scans_save()
+    return {"ok": True, "on": b.on}
 
 
 @app.post("/api/probe-wifi")
@@ -8297,6 +8366,7 @@ STATUS_PAGE = r'''<!doctype html>
   --bg:#F0F4F8; --panel:#FFFFFF; --field:#FFFFFF; --ink:#1C2430; --muted:#5A6878; --line:#D5DFE9;
   --accent:#174A72; --accent-ink:#FFFFFF; --hover:#E2ECF5;
   --ok:#3E9A4A; --warn:#D99A06; --bad:#D1410C; --off:#B4BEC9; --up:#E07A1F;
+  --warn-ink:#946800;   /* giallo leggibile su bianco (testi e icone dei pulsanti) */
   --s1:#174A72; --s2:#2E9C8F; --s3:#8B5CC6; --s4:#C2185B;     /* colori delle sonde (Dashboard, speedtest) */
   --s5:#C86A12; --s6:#4E7D23; --s7:#9B7400; --s8:#546E7A;
   --bar:#0F3352; --bar-ink:#FFFFFF; --bar-muted:#B9CCDD; --bar-line:rgba(255,255,255,.3); --bar-hover:rgba(255,255,255,.12);
@@ -8306,7 +8376,7 @@ STATUS_PAGE = r'''<!doctype html>
 @media (prefers-color-scheme: dark){:root{
   color-scheme:dark;
   --bg:#11161C; --panel:#19212A; --field:#1F2832; --ink:#E6ECF2; --muted:#9AA8B8; --line:#2C3846;
-  --accent:#6FA8DC; --accent-ink:#0B1622; --hover:#22303E; --ok:#6CC070; --warn:#F2C04A;
+  --accent:#6FA8DC; --accent-ink:#0B1622; --hover:#22303E; --ok:#6CC070; --warn:#F2C04A; --warn-ink:#F2C04A;
   --bad:#FF7B47; --off:#4A5664; --up:#F0A04B; --bar:#0C2238; --bar-muted:#93AAC0;
   --s1:#6FA8DC; --s2:#4FC7B6; --s3:#B794F0; --s4:#F48FB1;
   --s5:#F0A04B; --s6:#9CCC65; --s7:#E0B84F; --s8:#A7B9C2;
@@ -8337,7 +8407,12 @@ main > header :is(.headstart > button,.tools > button,.tools > details > summary
   background:transparent;color:var(--bar-ink);border-color:var(--bar-line)}
 main > header :is(.headstart > button,.tools > button,.tools > details > summary,.tools select.pill):hover{
   background:var(--bar-hover);border-color:var(--bar-ink)}
-main > header .tools > button.primary{background:var(--bar-ink);border-color:var(--bar-ink);color:var(--bar);font-weight:600}
+main > header .tools > button.primary{background:var(--bar-ink);border-color:var(--bar-ink);color:var(--bar);font-weight:700;
+  box-shadow:0 0 0 3px rgba(255,255,255,.22)}
+/* passandoci sopra resta pieno (la regola generale della barra lo renderebbe trasparente: scritta invisibile) */
+main > header .tools > button.primary:hover{background:#DCE8F3;border-color:#DCE8F3;color:var(--bar);
+  box-shadow:0 0 0 3px rgba(255,255,255,.35)}
+main > header .tools > button.primary:disabled{opacity:.7;box-shadow:none}
 main > header .tools select.pill option{background:var(--panel);color:var(--ink)}
 /* la regola qui sopra azzera lo sfondo, e con lui la freccia: freccia chiara sulla barra scura */
 main > header .tools select.pill,main > header .tools select.pill:hover{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -8390,7 +8465,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261027-171600") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261028-180000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -8442,7 +8517,7 @@ body.reorder .dev{grid-template-columns:auto 14px minmax(0,1fr) auto auto auto a
 .dev .scan:is(.safe,.risk-media,.risk-alta) svg path.body{fill:currentColor}
 .dev .scan.safe{color:var(--ok)}
 .dev .scan.safe svg .ok{display:inline}
-.dev .scan.risk-media{color:var(--warn)}
+.dev .scan.risk-media{color:var(--warn-ink)}
 .dev .scan.risk-alta{color:var(--bad)}
 .dev .scan:is(.risk-media,.risk-alta) svg .warn{display:inline}
 .dev .scan.failed{color:var(--bad)}
@@ -8462,6 +8537,8 @@ body.reorder .dev{grid-template-columns:auto 14px minmax(0,1fr) auto auto auto a
 .scan-list li.alta .risk{color:var(--bad);border-color:var(--bad)} .scan-list li.media .risk{color:var(--warn);border-color:var(--warn)}
 .scan-list .note{grid-column:2;color:var(--muted);font-size:.88rem}
 .scan-daily{display:flex;align-items:center;gap:8px;cursor:pointer}
+.scan-pc{display:grid;gap:2px;margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.scan-pc .hint{margin:0 0 0 26px}
 .scan-mode{display:grid;gap:4px;margin:4px 0 12px}
 .scan-mode select{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);
   border-radius:8px;padding:8px 10px;max-width:100%}
@@ -8692,7 +8769,7 @@ button.dash-stat:hover{border-color:var(--accent)}
 .dev-filter button{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;
   border:1px solid var(--line);background:var(--panel);color:inherit;font:inherit;cursor:pointer}
 .dev-filter button:hover{border-color:var(--accent)}
-.dev-filter button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.dev-filter button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .dev-filter button i{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
 .dev-filter button.ok i{background:var(--ok)}
 .dev-filter button.warn i{background:var(--warn)}
@@ -8802,7 +8879,7 @@ div.sp-custom{flex-basis:100%}
 .av-rng{display:inline-flex;gap:4px}
 .av-rng button,.av-pick{font:inherit;font-size:.82rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);
   border-radius:99px;padding:3px 11px;cursor:pointer}
-.av-rng button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.av-rng button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .av-rows{display:grid;grid-template-columns:minmax(80px,max-content) minmax(0,1fr) 3.6em;gap:7px 12px;align-items:center;margin-top:12px}
 .av-name{display:flex;align-items:center;gap:7px;min-width:0;font-size:.9rem}
 .av-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22ch}
@@ -8851,7 +8928,7 @@ section > .dup-note{margin:8px 0 10px}
 .blk-name{font-weight:600;font-size:.86rem;color:var(--muted);flex:1}
 .szctl{display:none;gap:2px} .dashorder .szctl{display:inline-flex}
 .szctl button{padding:2px 8px;font-size:.78rem;border-radius:6px;min-width:28px}
-.szctl button[aria-pressed=true]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.szctl button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .dash-card .szctl{margin-top:6px;align-self:flex-start}
 .dash-ghead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;background:var(--panel);
   border:1px solid var(--line);border-top:4px solid var(--pc);border-radius:10px}
@@ -8926,6 +9003,8 @@ body.dashorder .dash-summary,body.dashorder .dash-line{display:none}
   .drow > input:first-child{grid-area:n} .drow > input.mono{grid-area:h} .drow select.prio{grid-area:p} .drow .del{grid-area:del}
 }
 .drow .del{border:0;background:transparent;color:var(--muted);font-size:1.15rem;padding:4px 8px}
+.drow .dscan{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:.88rem;color:var(--muted);margin:-2px 0 4px;cursor:pointer}
+.drow .dscan input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .drow .del:hover{color:var(--bad)}
 [hidden]{display:none !important}
 
@@ -8995,14 +9074,16 @@ body.nav-open .navveil{display:block}
 /* Dispositivi in rete (elenco del FRITZ!Box) */
 section.netdev{padding:14px 16px}
 .nd-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.nd-head h2{margin:0;font-size:1.05rem} .nd-head .sub{color:var(--muted);font-size:.86rem} .nd-head .sp{flex:1}
+.nd-head h2{margin:0;font-size:1.25rem;font-weight:600} .nd-head .sub{color:var(--muted);font-size:.86rem} .nd-head .sp{flex:1}
 .nd-head input[type=search]{font:inherit;font-size:.86rem;border:1px solid var(--line);border-radius:99px;padding:5px 12px;
   width:200px;background:var(--panel);color:var(--ink)}
+.nd-head .fold{margin-right:-4px}
+section.netdev.collapsed .nd-head input[type=search],body.sections section.netdev .nd-head input[type=search]{display:none}
 .nd-chips{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
 .nd-chips button{font:inherit;font-size:.82rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);
   border-radius:99px;padding:3px 11px;cursor:pointer}
-.nd-chips button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
-.nd-chips button.w{color:var(--warn)} .nd-chips button.w[aria-pressed=true]{color:#fff}
+.nd-chips button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.nd-chips button.w{color:var(--warn-ink)} .nd-chips button.w[aria-pressed=true]{color:var(--accent-ink)}
 section.netdev table{width:100%;border-collapse:collapse;font-size:.9rem;margin-top:6px}
 section.netdev th{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;text-align:left;
   font-weight:600;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -9096,6 +9177,9 @@ body.sections #probes > section.dragging{opacity:.4}
 .sections-note{display:none;background:var(--panel);border:1px dashed var(--accent);border-radius:8px;
   padding:10px 14px;margin:0 0 12px;color:var(--muted)}
 body.sections .sections-note{display:block}
+body.sections .reorder-note{display:none}
+/* «⇅ Ordine» in Monitor dispositivi: sezioni aperte, per riordinare anche i dispositivi */
+body.sections.reorder #probes .curtain{display:grid}
 @media (prefers-reduced-motion: reduce){.curtain,.fold{transition:none}}
 
 /* Riquadro FRITZ!Box */
@@ -9449,7 +9533,7 @@ h3{font-size:1.1rem;font-weight:600;margin:0 0 10px}
     <h2 class="pagename" id="pagename">Stato rete</h2>
     </div>
     <div class="tools" id="main-tools">
-      <button type="button" id="sections-btn" title="Cambia l'ordine dei riquadri">⇅ Ordine</button>
+      <button type="button" id="sections-btn" title="Cambia l'ordine di riquadri e dispositivi">⇅ Ordine</button>
       <button type="button" id="dash-order-btn" title="Cambia l'ordine dei dispositivi" hidden>⇅ Ordine</button>
       <details id="dash-menu" hidden>
         <summary>Visualizza</summary>
@@ -9463,10 +9547,6 @@ h3{font-size:1.1rem;font-weight:600;margin:0 0 10px}
     <div class="tools" id="sections-tools" hidden>
       <button type="button" id="sections-cancel">Annulla</button>
       <button type="button" class="primary" id="sections-save">Salva ordine</button>
-    </div>
-    <div class="tools" id="reorder-tools" hidden>
-      <button type="button" id="reorder-cancel">Annulla</button>
-      <button type="button" class="primary" id="reorder-save">Salva ordine</button>
     </div>
   </header>
 
@@ -10033,6 +10113,9 @@ h3{font-size:1.1rem;font-weight:600;margin:0 0 10px}
   <div class="dlg-body">
     <p class="hint" id="scan-sub"></p>
     <ul class="scan-list" id="scan-list"></ul>
+    <div class="scan-pc" id="scan-pc-box" hidden>
+      <label class="scan-daily"><input type="checkbox" id="scan-portcheck"> Se il ping fallisce, prova le porte aperte</label>
+      <span class="hint" id="scan-pc-hint"></span></div>
     <div class="scan-mode"><label class="field" for="scan-mode">Tipo di controllo</label>
       <select id="scan-mode">
         <option value="veloce">Veloce: solo le porte a rischio</option>
@@ -10313,7 +10396,7 @@ function renderDevice(d, probeLabel, probeKey) {
 
   // trascinamento (desktop)
   li.draggable = reorder;
-  li.addEventListener("dragstart", e => { li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+  li.addEventListener("dragstart", e => { e.stopPropagation(); li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
   li.addEventListener("dragend", () => li.classList.remove("dragging"));
   li.addEventListener("dragover", e => {
     const src = li.parentNode.querySelector(".dragging");
@@ -10376,9 +10459,10 @@ function showPage(page, remember = true, sub = null) {
   sub = netSubName(sub);
   if (page === "net" && NET_SUBS.some(([k]) => k === sub)) netSub = sub;
   const net = page === "net";
-  if (!(net && netSub === "sonde") && reorder) setReorder(false);
   const plain = netSub === "eventi" || netSub === "mappa";     // pagine senza riquadri da riordinare
   if (!(net && !plain) && sectionsMode) setSections(false);
+  // con «⇅ Ordine» attivo i dispositivi si riordinano solo in Monitor dispositivi
+  if (reorder !== (sectionsMode && net && netSub === "sonde")) setReorder(!reorder);
   $("#sections-btn").hidden = !net || plain;                     // ordine di sonde e FRITZ!Box
   $("#dash-menu").hidden = page !== "dash";                      // Visualizza, come Ordine
   $("#dash-order-btn").hidden = page !== "dash";                 // ordine dei dispositivi della Dashboard
@@ -11183,7 +11267,7 @@ function probesTopo(d) {
   const off = probes.filter(p => p.state === "bad").length;
   $("#probes-topo-sub").textContent = `${probes.length} ${probes.length === 1 ? "sonda" : "sonde"} · ${devs} dispositivi`
     + (off ? ` · ${off} ${off === 1 ? "sonda offline" : "sonde offline"}` : "")
-    + (down ? ` · ${down} non rispondono` : "");
+    + (down ? ` · ${down === 1 ? "1 non risponde" : `${down} non rispondono`}` : "");
   const srv = d.server || {};
   const server = { name: srv.name && srv.name !== "server" ? srv.name : "Server", ip: location.host,
                    sub: srv.version ? `netmon ${srv.version}` : "", title: location.host };
@@ -11260,7 +11344,6 @@ function render(d) {
     };
     voce("Aggiungi o modifica dispositivi", () => openDevices(p, true));
     if (p.devices.length) voce("Rimuovi dispositivi", () => setRemoving(!removing.has(p.name)));
-    if (p.devices.length > 1) voce("Riordina i dispositivi", () => setReorder(true));
     bMod.onclick = e => {
       e.stopPropagation();
       const apri = menu.hidden;
@@ -11338,7 +11421,7 @@ function ndMonitor(p, d) {
   const name = (d.name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9 _.-]+/g, "-")
     .replace(/^[^A-Za-z0-9]+/, "").slice(0, 40) || "dispositivo";
   openDevices(p);
-  const row = devRow(name, d.ip || "");
+  const row = devRow(name, d.ip || "", "normale", true);
   syncDevAdd();
   row.querySelector("input").focus();
 }
@@ -11348,7 +11431,8 @@ function netdevSection(p) {
   const on = all.filter(d => d.on), weak = d => d.via === "wifi" && d.signal != null && d.signal <= ND_WEAK;
   const sec = el("section", "netdev");
   const head = el("div", "nd-head");
-  head.append(el("h2", "", "Dispositivi in rete"), el("span", "src", "sonda " + (p.label || p.name)));
+  head.append(makeFold(sec, "netdev:" + p.name, "Dispositivi in rete"), el("h2", "", "Dispositivi in rete"),
+              el("span", "src", "sonda " + (p.label || p.name)));
   const quando = p.fritz.netdev_ts ? Math.max(0, Math.round((Date.now() / 1000 - p.fritz.netdev_ts) / 60)) : null;
   head.append(el("span", "sub", on.length === 1 ? "1 collegato ora" : `${on.length} collegati ora`));
   head.append(el("span", "sp"));
@@ -11429,7 +11513,7 @@ function netdevSection(p) {
   note.append(el("span", "", quando == null ? "Dal FRITZ!Box." : quando < 1 ? "Dal FRITZ!Box, aggiornato ora." : `Dal FRITZ!Box, aggiornato ${quando} min fa.`),
               " ", el("span", "", "La velocità è quella del collegamento, non il traffico."));
   foot.append(lab, note);
-  sec.append(head, chips, table, foot);
+  sec.append(head, curtain(chips, table, foot));
   return sec;
 }
 
@@ -12844,9 +12928,27 @@ async function refresh(force = false) {
       return;
     }
     if (!r.ok) throw new Error("HTTP " + r.status);
-    render(await r.json());
+    const data = await r.json();
+    // Le sezioni si ricostruiscono da capo: per un attimo la pagina è più corta e il browser la
+    // riporterebbe in cima. Si rimette dov'era, prima che venga disegnata.
+    // Anche un campo in cui si sta scrivendo (la ricerca di «Dispositivi in rete») viene rifatto:
+    // il cursore torna nel campo nuovo, nella stessa posizione.
+    const y = scrollY, act = document.activeElement;
+    const sec = act && act.matches("input") && probesEl.contains(act) ? act.closest("section[data-lid]") : null;
+    const campo = sec && { lid: sec.dataset.lid, i: [...sec.querySelectorAll("input")].indexOf(act),
+                           a: act.selectionStart, b: act.selectionEnd };
+    render(data);
     renderWifiNets();
     if (!$("#page-dash").hidden) renderDash();
+    if (campo) {
+      const nuovo = [...probesEl.querySelectorAll("section[data-lid]")].find(s => s.dataset.lid === campo.lid)
+        ?.querySelectorAll("input")[campo.i];
+      if (nuovo) {
+        nuovo.focus({ preventScroll: true });
+        try { if (campo.a != null) nuovo.setSelectionRange(campo.a, campo.b); } catch {}
+      }
+    }
+    if (scrollY !== y) scrollTo(0, y);
     footState = { ...footState, time: new Date().toLocaleTimeString(I18N.locale),
                   error: null, nextAt: Date.now() + PERIOD };
   } catch (e) {
@@ -12857,7 +12959,7 @@ async function refresh(force = false) {
 }
 
 async function saveOrder() {
-  const btn = $("#reorder-save");
+  const btn = $("#sections-save");
   btn.disabled = true;
   try {
     for (const sec of probesEl.querySelectorAll("section[data-probe]")) {
@@ -12881,16 +12983,13 @@ async function saveOrder() {
   return true;
 }
 
+// Riordino dei dispositivi dentro le sonde: fa parte di «⇅ Ordine» in Stato rete › Monitor dispositivi,
+// insieme all'ordine delle sezioni (un solo «Salva ordine» per tutti e due).
 function setReorder(on) {
-  if (on && !(currentPageIsNet() && netSub === "sonde")) showPage("net", true, "sonde");
-  if (on && sectionsMode) setSections(false);
   reorder = on;
   document.body.classList.toggle("reorder", on);
-  $("#reorder-tools").hidden = !on;
-  $("#main-tools").hidden = on;
   probesEl.querySelectorAll(".dev").forEach(li => li.draggable = on);
 }
-$("#reorder-cancel").onclick = () => { setReorder(false); refresh(); };
 
 // ---- ordine delle sezioni (ping di ogni sonda e riquadri FRITZ!Box) ----
 function sectionName(sec) { return (sec.querySelector(".probe-head h2, .nd-head h2")?.textContent || "sezione")
@@ -12917,7 +13016,7 @@ function addSectionMove(sec) {
   head.prepend(box);
   sec.draggable = sectionsMode;
   sec.addEventListener("dragstart", e => {
-    if (!sectionsMode) return;
+    if (!sectionsMode || e.target !== sec) return;          // si sta trascinando un dispositivo
     sec.classList.add("dragging"); e.dataTransfer.effectAllowed = "move";
   });
   sec.addEventListener("dragend", () => sec.classList.remove("dragging"));
@@ -12932,8 +13031,9 @@ function addSectionMove(sec) {
 }
 
 function setSections(on) {
-  if (on) { if (!currentPageIsNet() || netSub === "eventi") showPage("net", true, "sonde"); if (reorder) setReorder(false); }
+  if (on && (!currentPageIsNet() || netSub === "eventi")) showPage("net", true, "sonde");
   sectionsMode = on;
+  setReorder(on && currentPageIsNet() && netSub === "sonde");
   document.body.classList.toggle("sections", on);
   $("#sections-tools").hidden = !on;
   $("#main-tools").hidden = on;
@@ -12966,8 +13066,9 @@ async function saveSections() {
 }
 $("#sections-btn").onclick = () => setSections(true);
 $("#sections-cancel").onclick = () => { setSections(false); refresh(); };
-$("#sections-save").onclick = async () => { if (await saveSections()) { setSections(false); refresh(); } };
-$("#reorder-save").onclick = async () => { if (await saveOrder()) { setReorder(false); refresh(); } };
+$("#sections-save").onclick = async () => {
+  if (await saveSections() && (!reorder || await saveOrder())) { setSections(false); refresh(); }
+};
 
 // ---- impostazioni ----
 function cmode() { return document.querySelector("input[name=c-mode]:checked")?.value || "proporzionale"; }
@@ -13142,7 +13243,7 @@ $("#set-save").onclick = async () => {
 };
 
 // ---- dispositivi ----
-function devRow(name = "", host = "", prioVal = "normale") {
+function devRow(name = "", host = "", prioVal = "normale", nuovo = !name) {
   const row = el("div", "drow");
   const n = el("input"), h = el("input", "mono"), del = el("button", "del", "×");
   n.value = name; n.placeholder = "nome"; n.setAttribute("aria-label", "Nome dispositivo");
@@ -13158,6 +13259,13 @@ function devRow(name = "", host = "", prioVal = "normale") {
   pr.onchange = () => { pr.dataset.p = pr.value; };
   del.type = "button"; del.title = "Rimuovi"; del.onclick = () => { row.remove(); syncDevAdd(); };
   row.append(n, h, pr, del);
+  // dispositivo nuovo: si può chiedere subito il controllo approfondito delle porte (sonde aggiornate)
+  if (nuovo && current && current.system && current.system.scan_modes) {
+    const lab = el("label", "dscan"), cb = el("input");
+    cb.type = "checkbox"; cb.className = "deep";
+    lab.append(cb, " Controllo approfondito delle porte dopo il salvataggio (fino a 15 minuti)");
+    row.append(lab);
+  }
   $("#dev-rows").appendChild(row);
   return row;
 }
@@ -13244,7 +13352,17 @@ $("#dev-save").onclick = async () => {
     catch (e) { errs.push(`${device}: ${e.message}`); }
   }
   if (errs.length) flash("Priorità non salvate: " + errs.join(" · "));
-  if (prios.length) refresh();
+  // controllo approfondito chiesto per i dispositivi nuovi: uno alla volta, gli altri in coda
+  const deep = [...$("#dev-rows").querySelectorAll(".drow")]
+    .filter(r => r.querySelector("input.deep")?.checked).map(r => r.querySelector("input").value.trim()).filter(Boolean);
+  const avviati = [];
+  for (const device of deep) {
+    try { await postJSON("/api/probe-scan", { probe, device, mode: "approfondito" }); avviati.push(device); }
+    catch (e) { errs.push(`${device}: ${e.message}`); }
+  }
+  if (avviati.length) flash("Controllo approfondito chiesto per " + avviati.join(", ") + ": l'esito arriva negli eventi e nello scudo 🛡.");
+  if (deep.length > avviati.length) flash("Controllo approfondito non partito: " + errs.join(" · "));
+  if (prios.length || avviati.length) refresh();
 };
 
 async function saveConfig(config, msgSel, dlgSel) {
@@ -13568,6 +13686,15 @@ function renderScan() {
     });
   }
   $("#scan-daily").checked = (s.daily || []).includes(scanCur.device);
+  // prova delle porte quando il ping fallisce: con le porte trovate aperte dall'ultimo controllo
+  const pcOn = (s.portcheck || []).includes(scanCur.device), pcPorts = last && last.ok ? last.ports.map(f => f.port).slice(0, 5) : [];
+  $("#scan-pc-box").hidden = !(p && p.system && p.system.port_check);
+  $("#scan-portcheck").checked = pcOn;
+  $("#scan-portcheck").disabled = !pcOn && !pcPorts.length;
+  $("#scan-pc-hint").textContent = pcPorts.length
+    ? (pcPorts.length === 1 ? `Prova la porta ${pcPorts[0]}: se risponde, il dispositivo è acceso e non parte l'avviso (giallo nella pagina).`
+       : `Prova le porte ${pcPorts.join(", ")}: se una risponde, il dispositivo è acceso e non parte l'avviso (giallo nella pagina).`)
+    : "Serve prima un controllo che trovi almeno una porta aperta.";
   // sonde che non conoscono le modalità fanno sempre il controllo standard
   const modes = !!(p && p.system && p.system.scan_modes);
   $("#scan-mode").disabled = !modes || busy || !!pos;
@@ -13605,6 +13732,15 @@ $("#scan-cancel").onclick = async () => {
     $("#scan-msg").textContent = "Tolto dalla coda.";
     await refresh(true);
   } catch (e) { $("#scan-msg").textContent = e.message; }
+};
+$("#scan-portcheck").onchange = async () => {
+  if (!scanCur) return;
+  const want = $("#scan-portcheck").checked;
+  try {
+    await postJSON("/api/probe-scan-portcheck", { probe: scanCur.probe, device: scanCur.device, on: want });
+    $("#scan-msg").textContent = want ? "Prova delle porte attiva." : "Prova delle porte tolta.";
+    await refresh(true);
+  } catch (e) { $("#scan-portcheck").checked = !want; $("#scan-msg").textContent = e.message; }
 };
 $("#scan-daily").onchange = async () => {
   if (!scanCur) return;

@@ -25,7 +25,7 @@ Uso (come utente del servizio):
 - reset:         cancella utenti, sessioni e codici di accesso (gli amministratori restano); al
                  prossimo accesso la pagina di stato chiederà di nuovo chiave del server, email e password
 """
-__version__ = "1.1.20261027-171600"
+__version__ = "1.1.20261028-180000"
 import getpass
 import json
 import os

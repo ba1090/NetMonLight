@@ -14,9 +14,7 @@ compare nel Dock.
 Due versioni dentro la stessa app, scelte da sole:
 
 - **con la pagina nel browser** (macOS 11 o successivo, Apple Silicon o Intel): i programmi
-  `firma-netmon-arm64` e `firma-netmon-amd64` in `Contents/MacOS`, compilati da `tools/firma/build.sh`. Ci
-  sono nell'app del repository GitHub, non in quella dentro lo zip del pacchetto (sarebbero un peso
-  inutile per VM e sonde);
+  `firma-netmon-arm64` e `firma-netmon-amd64` in `Contents/MacOS`, compilati da `tools/firma/build.sh`;
 - **con le finestre di sistema** (`firma-netmon-classic`): se quei programmi mancano o il Mac è più vecchio.
   Usa solo ciò che c'è già in macOS (`openssl`, `unzip`, le finestre di sistema).
 
@@ -38,7 +36,8 @@ L'app non è firmata da Apple, quindi macOS la blocca al primo avvio:
 
 Da Terminale fa lo stesso: `xattr -dr com.apple.quarantine "/Applications/Firma NetMon.app"`.
 
-Se l'app non parte affatto (lo zip è stato estratto senza i permessi):
+L'app si prende dal repository GitHub: lo zip del pacchetto (`netmon-light-<versione>.zip`) non contiene gli
+strumenti. Se non parte affatto (copiata o estratta senza i permessi):
 `chmod +x "/Applications/Firma NetMon.app/Contents/MacOS/"*`.
 
 ## Prima volta: la chiave di rilascio

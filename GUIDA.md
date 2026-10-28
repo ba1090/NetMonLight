@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261027-171600*
+*Versione di netmon: 1.1.20261028-180000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -68,8 +68,8 @@ ridurre ancora il carico puoi alzare *Traffico: un campione ogni* (30 secondi di
 comando `ping` per ogni dispositivo (il servizio ha solo il permesso `CAP_NET_RAW`, necessario a
 questo; se manca usa il comando `ping`). Una sola connessione HTTPS al server resta aperta e viene
 riusata. Il FRITZ!Box ha una sola connessione condivisa, con la descrizione dei servizi in cache
-su disco, e i dati che cambiano di rado (modello, velocità della linea, nomi delle reti Wi-Fi,
-elenco dei dispositivi) si leggono ogni 10 minuti. Il buffer delle misure si legge a blocchi.
+su disco, e i dati che cambiano di rado (modello, velocità della linea, nomi delle reti Wi-Fi) si
+leggono ogni 10 minuti; mappa mesh, fibra ed elenco dei dispositivi ogni 5. Il buffer delle misure si legge a blocchi.
 La pagina locale parte solo quando la apri e si chiude dopo 10 minuti di inattività. Nel
 registro compare una riga `OK` solo quando cambia qualcosa, e comunque una volta all'ora.
 - Il dominio **netmonhome.net**, con un record DNS verso la VM del server.
@@ -127,7 +127,8 @@ netmon/
 │   ├── netmon-config.service servizio della pagina locale
 │   └── netmon-config.socket  avvio della pagina locale solo quando la apri
 └── tools/
-    ├── nuova-versione.py     prepara un rilascio: alza la versione e crea la zip
+    ├── nuova-versione.py     prepara un rilascio: alza la versione e crea la zip (solo VERSION, server/ e
+    │                         probe/: test, strumenti e documenti restano nel repository)
     ├── genera-icone.py       rigenera logo e icone (brand.py) e le icone di Firma NetMon (--mac)
     ├── mac/
     │   ├── Firma NetMon.app  app per il Mac: crea la chiave di rilascio e firma i pacchetti netmon.zip, con
@@ -565,7 +566,8 @@ alla mappa mesh. I filtri in alto mostrano Wi-Fi, cavo, segnale debole (sotto �
 dispositivi **non monitorati**, cioè non ancora tra i dispositivi pingati dalla sonda; la casella
 in fondo aggiunge quelli non collegati, con l'ultima volta che il server li ha visti. Il pulsante
 **+ Monitora** apre *Dispositivi* della sonda con una riga già compilata (nome e IP attuale): basta
-salvare. Gli indirizzi MAC restano sulla sonda e non vengono inviati al server.
+salvare. Come gli altri riquadri, la sezione si chiude con la freccia accanto al titolo (chiusa mostra
+solo quanti dispositivi sono collegati). Gli indirizzi MAC restano sulla sonda e non vengono inviati al server.
 
 Mesh, fibra e dispositivi in rete si nascondono, come le altre voci, da **Impostazioni → Visualizzazione → Riquadro
 FRITZ!Box** (*Rete mesh*, *Stato della fibra*, *Dispositivi in rete*). Per leggerli l'utente del FRITZ!Box deve avere il
@@ -578,11 +580,12 @@ un'etichetta con il nome della sonda di provenienza. Colonne e contenuto del riq
 restano salvati nel tuo account: ogni dispositivo da cui accedi mostra la stessa pagina.
 
 Ogni sonda ha la sua sezione con i propri ping e il proprio riquadro FRITZ!Box. Per cambiarne
-l'ordine premi **⇅ Ordine** in alto (in *Stato rete › Monitor dispositivi* o *› FRITZ!Box*): le
-sezioni si riducono alle sole intestazioni (i riquadri FRITZ!Box mostrano sempre la sonda di
-provenienza) e puoi spostarle con ▲▼ o trascinandole, poi **Salva ordine**. L'ordine è salvato nel tuo account sul server, quindi è
-lo stesso su PC e telefono; le sonde aggiunte dopo compaiono in fondo. La voce *Riordina i dispositivi* del
-pulsante **Modifica ▾** di una sonda, invece, riordina i dispositivi al suo interno.
+l'ordine premi **⇅ Ordine** in alto (in *Stato rete › Monitor dispositivi* o *› FRITZ!Box*) e sposta le
+sezioni con ▲▼ o trascinandole, poi **Salva ordine**. In *› FRITZ!Box* le sezioni si riducono alle sole
+intestazioni (i riquadri FRITZ!Box mostrano sempre la sonda di provenienza). In *› Monitor dispositivi* restano
+aperte e ogni dispositivo ha le sue ▲▼: nello stesso passaggio riordini anche i dispositivi dentro ogni sonda,
+e **Salva ordine** salva tutto insieme. L'ordine è salvato nel tuo account sul server, quindi è lo stesso su
+PC e telefono; le sonde aggiunte dopo compaiono in fondo.
 
 **Periodo personalizzato.** In ogni grafico, oltre a 1 ora…30 giorni, *Personalizzato* permette
 di scegliere data e ora di inizio e fine (fino a 400 giorni). La granularità dei punti si adatta
@@ -729,8 +732,9 @@ sezione (per esempio `#vm/registro-amministrativo`), quindi si può salvare nei 
 
 Anche nella pagina di stato il menu è ad albero: sotto *Stato rete* ci sono, rientrate, **FRITZ!Box**,
 **Monitor dispositivi**, **Eventi** e **Mappa**, e la pagina ne mostra una alla volta (in alto il percorso, per esempio
-*Stato rete › Monitor dispositivi*). Il pulsante **⇅ Ordine** in alto cambia l'ordine delle sonde (in
-*Monitor dispositivi*) o dei riquadri FRITZ!Box (in *FRITZ!Box*); l'ordine resta nel tuo account.
+*Stato rete › Monitor dispositivi*). Il pulsante **⇅ Ordine** in alto cambia l'ordine delle sonde e dei
+dispositivi dentro ognuna (in *Monitor dispositivi*) o dei riquadri FRITZ!Box (in *FRITZ!Box*); l'ordine resta
+nel tuo account.
 
 **Prima sonda: procedura guidata.** Un account senza sonde trova sulla **Dashboard** il riquadro *Collega la
 tua prima sonda*, in quattro passi: **Nome** (crea la sonda; se ce n'è già una creata e mai collegata propone
@@ -852,13 +856,15 @@ larghezza, ma resta l'ordine scelto.
 
 **Pulsanti nella sezione di ogni sonda** (*Stato rete › Monitor dispositivi*), accanto al nome:
 
-- **Modifica ▾**, con tre voci:
+- **Modifica ▾**, con due voci:
   - *Aggiungi o modifica dispositivi*: apre la finestra *Dispositivi* per aggiungere, rinominare o
-    rimuovere i dispositivi controllati (fino al limite del tuo account, vedi *Limiti per utente*) e
-    sceglierne la priorità di notifica;
+    rimuovere i dispositivi controllati (fino al limite del tuo account, vedi *Limiti per utente*),
+    sceglierne la priorità di notifica e, per ogni dispositivo nuovo, chiedere il controllo approfondito delle
+    porte (vedi *Controllo di sicurezza dei dispositivi*);
   - *Rimuovi dispositivi*: su ogni dispositivo compare un «－» rosso; premuto (con conferma) toglie quel
-    dispositivo. Finché la modalità è attiva, accanto a *Modifica* c'è **Fine rimozione** per chiuderla;
-  - *Riordina i dispositivi* (con almeno due dispositivi): trascinandoli o con le frecce, poi *Salva ordine*.
+    dispositivo. Finché la modalità è attiva, accanto a *Modifica* c'è **Fine rimozione** per chiuderla.
+
+  L'ordine dei dispositivi si cambia con **⇅ Ordine** in alto, insieme a quello delle sezioni.
 - **SpeedTest**: vedi *SpeedTest*.
 
 Accanto a ogni dispositivo: il menu della **priorità** (vedi *Priorità delle notifiche*), **⏸**
@@ -926,7 +932,7 @@ dura un giro di controlli e avvisa se si avvicina all'intervallo.
 | | Dispositivo | Sonda |
 |---|---|---|
 | 🟢 | risponde | report regolari |
-| 🟡 | 1–2 ping falliti, oppure sonda offline (stato sconosciuto) | nessun report da 1,5 intervalli |
+| 🟡 | 1–2 ping falliti, sonda offline (stato sconosciuto), oppure *non risponde al ping, porta … aperta* (vedi *Controllo di sicurezza*: nessun avviso) | nessun report da 1,5 intervalli |
 | 🔴 | 3 ping falliti consecutivi (parte l'alert) | nessun report da 3 intervalli (alert critico) |
 
 Le soglie si impostano dalla pagina di stato del server, **Impostazioni** → scheda *Controlli*:
@@ -942,6 +948,13 @@ riavvio chiesto dal pannello) entrambe le soglie si allungano di **un ciclo**, e
 ritardo né far partire l'avviso «non comunica» per questo. Con 60 s: in ritardo dopo 2 minuti e 30 secondi e
 irraggiungibile dopo 4 minuti (3 e 30 secondi e 5 minuti su un Pi Zero). Il margine vale finché la sonda non
 conferma la fine dell'operazione, al massimo per 3 ore.
+
+**Subito dopo la ripartenza** i primi cicli sono i più lenti (primo collegamento al FRITZ!Box, mappa mesh,
+elenco dei dispositivi), soprattutto su un Pi Zero. Per questo, per **5 minuti** dopo che la sonda ha confermato
+l'aggiornamento o il riavvio, e per 5 minuti dopo ogni ripartenza del suo programma (anche aggiornata a mano,
+riavviata dalla pagina locale o al ritorno della corrente), non risulta in ritardo e l'avviso «non comunica» non
+parte: la pagina scrive *in ripartenza dopo l'aggiornamento* (o *in ripartenza*). Il silenzio si conta sempre
+dall'ultimo report, quindi una sonda che non torna davvero viene segnalata al più 5 minuti più tardi del solito.
 
 Il dialogo mostra un'anteprima con i tempi risultanti. I valori nel `.env` del server
 (`STALE_FACTOR`, `HEARTBEAT_FACTOR`, `FAIL_THRESHOLD`, `DEFAULT_INTERVAL`) restano solo
@@ -1294,6 +1307,24 @@ Il colore dello scudo dice lo stato (passandoci sopra col mouse lo dice anche a 
 | giallo con «!» | rischio medio |
 | rosso con «!» | rischio alto |
 | contorno rosso | ultimo controllo non riuscito |
+
+**Controllo approfondito di un dispositivo nuovo** (si sceglie dispositivo per dispositivo, non per tutti).
+Nella finestra *Dispositivi*, sotto **ogni** riga aggiunta compare la sua casella *Controllo approfondito delle
+porte dopo il salvataggio*, spenta: spunti solo quelle dei dispositivi che vuoi controllare e, appena salvi,
+la sonda fa il controllo **approfondito** di ciascuno (fino a 15 minuti; con più dispositivi
+nuovi uno alla volta, gli altri in coda). Vale anche per i dispositivi aggiunti con **+ Monitora** da
+*Dispositivi in rete*. L'esito arriva negli *Ultimi eventi* e nello scudo, come un controllo chiesto a mano.
+
+**Porte aperte quando il ping fallisce** (spento all'inizio, si sceglie dispositivo per dispositivo).
+Alcuni dispositivi smettono di rispondere al ping pur funzionando (telecamere, PC con il firewall,
+dispositivi in risparmio energetico). Nella finestra dello scudo, la casella **Se il ping fallisce, prova
+le porte aperte** fa sì che, quando il ping di quel dispositivo non risponde, la sonda provi le porte
+trovate aperte dall'**ultimo controllo** riuscito (le prime 5): se una accetta la connessione il dispositivo
+è acceso, risulta **giallo** con *non risponde al ping, porta 80 aperta* e **non parte l'avviso**; se non
+risponde nessuna porta conta come un ping fallito, come sempre. La casella si attiva solo dopo un controllo
+che abbia trovato almeno una porta aperta, e un controllo nuovo aggiorna le porte da provare. Solo
+connessioni TCP che si chiudono subito, solo indirizzi della rete di casa, al massimo 8 secondi per giro.
+Lo storico dei ping (e la *Disponibilità*) registra comunque il ping perso.
 
 Ogni controllo lascia una riga *[SICUREZZA]* negli
 *Ultimi eventi*. Gli avvisi sono del tipo *Controllo di sicurezza* (si sceglie su quali canali in
@@ -2057,7 +2088,10 @@ L'aggiornamento guidato mostra alla fine *versione vecchia → nuova*.
 
 **Preparare un rilascio.** Lo script `tools/nuova-versione.py` (da dentro la cartella
 `netmon`) alza la versione in **tutti** i file e crea **sempre** la zip `../netmon-light-<versione>.zip`,
-controllata da `pkgcheck.py` (contenuto, link, sintassi, versione uguale in ogni programma):
+controllata da `pkgcheck.py` (contenuto, link, sintassi, versione uguale in ogni programma). Lo zip
+contiene solo ciò che serve a installare e aggiornare: `VERSION`, `server/` e `probe/`. Test,
+strumenti (*Firma NetMon*, questo script) e documenti restano nel repository. Il pacchetto che la VM
+prepara per le sonde contiene a sua volta solo `VERSION` e `probe/`:
 
 ```bash
 python3 tools/nuova-versione.py      # versione con data e ora italiana di adesso, e zip nuova
@@ -2076,8 +2110,9 @@ restano allineati.
 - **Mac** (`tools/mac/Firma NetMon.app`) e **Windows** (`tools/windows/FirmaNetMon.exe`, un solo file senza
   installazione): si apre una pagina nel browser, servita solo al tuo computer; scegli lo zip, scrivi la
   password e premi *Firma*: il browser scarica il `.sig` (e lo zip con la tua chiave, se non la conteneva
-  ancora). L'app per il Mac dentro lo zip del pacchetto, senza i programmi compilati, usa invece le finestre
-  di sistema e scrive il `.sig` accanto allo zip.
+  ancora). Su un Mac troppo vecchio per i programmi compilati, l'app usa invece le finestre di sistema e
+  scrive il `.sig` accanto allo zip. *Firma NetMon* si prende dal repository: lo zip del pacchetto non la
+  contiene.
 
 Nel pannello carichi i due file insieme. Lo script avvisa se nel repository
 manca `server/release-key.pub` (la chiave pubblica che la VM usa per verificare la firma).
@@ -2187,7 +2222,7 @@ dal `.env` e rilancia lo stesso comando del passo 2.
 | *Aggiornamento Netmon*: *Mancano file necessari* o *Percorsi non ammessi: NetMon-main/…* | Hai caricato il «Download ZIP» di GitHub, che ha la cartella `NetMon-main/` invece di `netmon/` (e il codice di `main`, non quello della PR). Serve lo zip del rilascio `netmon-light-<versione>.zip`, creato da `python3 tools/nuova-versione.py`. I file nascosti del Mac (`__MACOSX/`, `._*`, `.DS_Store`) non sono un problema: vengono ignorati. |
 | *Aggiornamento Netmon*: *Manca la firma dell'autore* | Hai selezionato solo lo zip: seleziona insieme lo zip e il suo `.sig` (tieni premuto ⌘ sul Mac). Il `.sig` lo crea *Firma NetMon* accanto allo zip. |
 | *Aggiornamento Netmon*: *Firma dell'autore NON valida* | Lo zip è stato modificato dopo la firma (riscaricalo e rifirmalo), oppure è firmato con una chiave diversa da quella della VM: l'impronta nel messaggio è quella della VM, confrontala con quella di *Firma NetMon*. Firmi da più computer (Mac e Windows)? Devono avere la stessa chiave: sul computer giusto *Salva una copia di riserva*, sull'altro *Usa la chiave di un altro computer* (vedi `tools/windows/LEGGIMI.md`, *Firmare da più computer*). |
-| *La VM non ha ancora la chiave di rilascio e il pacchetto non la contiene* | Firma lo zip con la versione aggiornata di *Firma NetMon* (quella dentro lo zip stesso, in `netmon/tools/mac`): aggiunge la tua chiave pubblica al pacchetto e poi lo firma. Ricarica lo zip con il **nuovo** `.sig`. Oppure aggiorna a mano via SSH con `installa-server.sh --aggiorna`. |
+| *La VM non ha ancora la chiave di rilascio e il pacchetto non la contiene* | Firma lo zip con la versione aggiornata di *Firma NetMon* (in `tools/mac` del repository: lo zip non contiene gli strumenti): aggiunge la tua chiave pubblica al pacchetto e poi lo firma. Ricarica lo zip con il **nuovo** `.sig`. Oppure aggiorna a mano via SSH con `installa-server.sh --aggiorna`. |
 | Caddy non parte o `reload` fallisce | `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`. Errore tipico: manca lo spazio prima della `{` (vedi A4). |
 | Caddy: *Timeout during connect (likely firewall problem)* | Porte 80/443 chiuse nel pannello del provider (passo A1) o nel firewall della VM: `sudo ufw status`, poi `sudo ufw allow 80,443/tcp`. |
 | Il sito va in timeout dal browser | Come sopra. Prova anche da rete mobile per escludere la rete dell'ufficio. |
