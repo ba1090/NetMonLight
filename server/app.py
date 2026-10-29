@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-140000"
+__version__ = "1.1.20261029-150000"
 VERSION = __version__
 import asyncio
 import base64
@@ -2892,6 +2892,9 @@ async def auth_register(b: SetupBody, request: Request):
     E' un segreto condiviso, lo conosce chiunque l'abbia usata per installare una sonda: un codice
     di accesso invece e' personale, si puo' revocare e dice chi ha invitato chi.
 
+    Sul server ancora senza utenti vale anche un codice di accesso: l'amministratore che lo crea dal
+    pannello non deve passare per la chiave del server.
+
     Tutti gli account sono uguali: ognuno vede e riceve solo le sue sonde."""
     ip = client_ip(request)
     too_many("ip:" + ip)
@@ -2899,11 +2902,12 @@ async def auth_register(b: SetupBody, request: Request):
     by_key = not await asyncio.to_thread(auth.has_users)
     key_ok = bool(code) and by_key and hmac.compare_digest(code, API_TOKEN)
     invite = None if key_ok else code
-    if not key_ok and (by_key or not code.startswith("accesso_")):
+    if not key_ok and not code.startswith("accesso_"):
         throttle.fail("ip:" + ip)
         log.warning("Registrazione: chiave o codice non valido da %s", ip)
         raise HTTPException(status_code=401, detail="Codice di accesso non valido: chiedine uno a chi "
-                            "amministra il server." if not by_key else "Chiave del server non valida.")
+                            "amministra il server." if not by_key else
+                            "Chiave del server o codice di accesso non validi.")
     email = normalize_email(b.email)
     if not valid_email(email):
         raise HTTPException(status_code=422, detail="L'email non è in un formato valido.")
@@ -9079,7 +9083,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-140000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-150000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */

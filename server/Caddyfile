@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261029-140000
+# netmon versione 1.1.20261029-150000
 # /etc/caddy/Caddyfile — Caddy ottiene e rinnova da solo il certificato HTTPS
 monitor.tuodominio.it {
     # pagina e dati compressi: circa 5 volte meno da scaricare

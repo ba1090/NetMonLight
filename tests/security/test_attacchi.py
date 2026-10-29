@@ -381,3 +381,19 @@ def test_import_refuses_token_of_existing_probe(tmp_path, make_user, admin):
     assert r.status_code == 200, r.text
     j = _job(admin, r.json()["id"])
     assert j["state"] == "error" and "stesse chiavi" in j["detail"], j
+
+
+# ------------------------------------------------------------------ registrazione sul server vuoto
+def test_first_account_with_access_code(client, admin, monkeypatch):
+    """Server ancora senza utenti: un codice creato dal pannello basta, non serve la chiave del server.
+    Un codice inventato o una chiave sbagliata restano rifiutati."""
+    monkeypatch.setattr(netmon.auth, "has_users", lambda: False)
+    client.cookies.clear()
+    r = client.post("/api/auth/register", json={"token": "chiave-sbagliata", "email": new_email("primo"), "password": PASSWORD})
+    assert r.status_code == 401 and r.json()["detail"] == "Chiave del server o codice di accesso non validi."
+    r = client.post("/api/auth/register", json={"token": "accesso_" + "x" * 20, "email": new_email("primo"), "password": PASSWORD})
+    assert r.status_code == 401
+    code = admin.post("/api/admin/invites/new", {"note": "primo", "max_uses": 1}).json()["code"]
+    r = client.post("/api/auth/register", json={"token": code, "email": new_email("primo"), "password": PASSWORD})
+    assert r.status_code == 200, r.text
+    client.cookies.clear()

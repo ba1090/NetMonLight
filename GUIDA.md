@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-140000*
+*Versione di netmon: 1.1.20261029-150000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -146,7 +146,8 @@ netmon/
 
 - **Chiave del server** (`API_TOKEN` nel `.env` della VM): serve **solo a creare il primo account** di
   una VM appena installata. Non vale per le sonde e non registra altri utenti.
-- **Codice di accesso** (`accesso_…`): lo genera un amministratore per invitare un utente.
+- **Codice di accesso** (`accesso_…`): lo genera un amministratore per invitare un utente. Vale anche per il
+  primo account: se il codice lo crei dal pannello, la chiave del server non serve.
 - **Token della sonda** (`sonda_…`): uno per ogni sonda, generato dal suo proprietario in
   *Impostazioni → Sonde*. È l'unica credenziale con cui una sonda si collega.
 - **Password della pagina locale** della sonda (*password di accesso alla sonda*): protegge

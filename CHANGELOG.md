@@ -7,8 +7,11 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-140000 · 5 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-150000 · 6 versioni) — NetMon Light
 
+- **Primo account con un codice di accesso**: sul server ancora senza utenti la registrazione accettava solo la
+  chiave del server, e un codice creato dal pannello dava *Chiave del server non valida*. Ora vale anche il
+  codice di accesso. *Server.*
 - **Sicurezza, dopo un test con gli attacchi più noti** (nessuna vulnerabilità trovata; questi i rinforzi):
   - *CSP con le impronte degli script*: sito, dashboard, pannello, informativa e pagina locale della sonda non
     permettono più script scritti nella pagina in generale (`'unsafe-inline'`), ma solo i loro, ognuno con la

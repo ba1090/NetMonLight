@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-140000"
+__version__ = "1.1.20261029-150000"
 import json
 import re
 
@@ -4950,6 +4950,16 @@ for _it, _tr in {
     "server non raggiungibile ({0})": ("server unreachable ({0})", "Server nicht erreichbar ({0})", "serveur injoignable ({0})"),
     "quel server dice che la sonda appartiene a {0}": ("that server says the probe belongs to {0}", "dieser Server sagt, die Sonde gehört zu {0}", "ce serveur dit que la sonde appartient à {0}"),
     "indirizzo non valido (serve https://; http:// solo nella rete di casa)": ("invalid address (https:// required; http:// only on the home network)", "ungültige Adresse (https:// nötig; http:// nur im Heimnetz)", "adresse non valide (https:// requis ; http:// seulement sur le réseau domestique)"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+# Registrazione sul server ancora senza utenti: chiave del server oppure codice di accesso
+for _it, _tr in {
+    "Chiave del server o codice di accesso non validi.": ("Invalid server key or access code.",
+                                                           "Ungültiger Serverschlüssel oder Zugangscode.",
+                                                           "Clé du serveur ou code d'accès non valide."),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)
