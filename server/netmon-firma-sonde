@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261029-200000
+# netmon versione 1.1.20261029-210000
 # Firma i programmi della sonda che il server distribuisce con il tasto "Aggiorna netmon"
 # (i quattro programmi e, se c'è, il pacchetto completo netmon.zip).
 # Installazione: sudo install -m 755 -o root -g root netmon-firma-sonde /usr/local/sbin/

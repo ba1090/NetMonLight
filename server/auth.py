@@ -6,7 +6,7 @@ Il database (auth.db) non contiene nulla di riutilizzabile se venisse copiato:
   soltanto nel cookie del browser.
 Il file viene creato con permessi 600 (leggibile solo dall'utente del servizio).
 """
-__version__ = "1.1.20261029-200000"
+__version__ = "1.1.20261029-210000"
 import ipaddress
 import base64
 import hashlib

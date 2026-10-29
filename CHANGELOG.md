@@ -7,8 +7,13 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-200000 · 11 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-210000 · 12 versioni) — NetMon Light
 
+- **Grafici di un altro account dopo il cambio utente**: uscendo e rientrando con un altro account nella stessa
+  scheda, la Dashboard riusava per qualche minuto i grafici in memoria del primo, e le schede dicevano «nessuna
+  misura salvata». Ora *Esci* ricarica la pagina da capo (in memoria non resta nulla dell'account), e un altro
+  account che entra nella stessa pagina la fa ripartire pulita. *Sei uscito* non è più scritto in rosso, né
+  dalla dashboard né dal pannello. *Pagina utente, pannello.*
 - **Grafici della Dashboard che si fermavano** finché non si ricaricava la pagina: una richiesta rimasta
   appesa (computer in stop, rete cambiata) bloccava la Disponibilità, e dati dei grafici vecchi o incompleti
   restavano fino alla scadenza (le schede dicevano «nessuna misura salvata» con il dispositivo che rispondeva).

@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-200000"
+__version__ = "1.1.20261029-210000"
 VERSION = __version__
 import asyncio
 import base64
@@ -9229,7 +9229,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-200000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-210000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -15114,7 +15114,12 @@ function showLogin(mode, message, bad = true) {
   (mode !== "login" ? $("#lg-token") : ($("#lg-email").value ? $("#lg-pass") : $("#lg-email"))).focus();
 }
 
+let pageUser = null;                     // account entrato in questa pagina
 function enterApp(email) {
+  // un altro account nella stessa pagina (dopo una sessione scaduta): si riparte da una pagina pulita,
+  // senza i dati in memoria di quello di prima
+  if (pageUser && pageUser !== email) { location.reload(); return; }
+  pageUser = email;
   currentUser = email;
   $("#acc-email").textContent = email || "—";
   $("#top-who").textContent = email || "";
@@ -15147,7 +15152,12 @@ async function checkAuth(message) {
     if (st.user) return enterApp(st.user);
     setupNeeded = !!st.setup_needed;
     // arrivo dal pannello senza accesso (o appena uscito): il suo messaggio
-    try { message = message || sessionStorage.getItem("netmon.loginmsg") || ""; sessionStorage.removeItem("netmon.loginmsg"); } catch {}
+    let neutro = false;
+    try {
+      const saved = sessionStorage.getItem("netmon.loginmsg");
+      if (!message && saved) { message = saved; neutro = sessionStorage.getItem("netmon.loginmsg.ok") === "1"; }
+      sessionStorage.removeItem("netmon.loginmsg"); sessionStorage.removeItem("netmon.loginmsg.ok");
+    } catch {}
     if (pendingInvite) {
       showLogin("register", "Invito ricevuto: codice ed email sono già inseriti, scegli la password.", false);
       $("#lg-token").value = pendingInvite.code;
@@ -15157,13 +15167,13 @@ async function checkAuth(message) {
       return;
     }
     if (pendingLogin !== null && !st.setup_needed) {
-      showLogin("login", message);
+      showLogin("login", message, !neutro);
       $("#lg-email").value = pendingLogin;
       pendingLogin = null;
       $("#lg-pass").focus();
       return;
     }
-    showLogin(st.setup_needed ? "first" : "login", message);
+    showLogin(st.setup_needed ? "first" : "login", message, !neutro);
   } catch (e) {
     showLogin("login", "Server non raggiungibile (" + e.message + ").");
   }
@@ -15789,7 +15799,14 @@ async function logout(all) {
   if (all && !confirm("Uscire da tutti i dispositivi? Su ognuno servirà di nuovo email e password.")) return;
   await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" },
                                     body: JSON.stringify({ all }) }).catch(() => {});
-  showLogin("login", all ? "Sei uscito da tutti i dispositivi." : "Sei uscito.", false);
+  // La pagina si ricarica da capo: in memoria non resta niente dell'account (stato, grafici,
+  // disponibilità). Altrimenti, entrando con un altro account, per qualche minuto si vedevano i
+  // dati in cache del primo (schede «senza misure»). Il messaggio passa dalla sessione del browser.
+  try {
+    sessionStorage.setItem("netmon.loginmsg", all ? "Sei uscito da tutti i dispositivi." : "Sei uscito.");
+    sessionStorage.setItem("netmon.loginmsg.ok", "1");
+  } catch {}
+  location.replace("/dashboard");
 }
 $("#logout-btn").onclick = () => logout(false);
 $("#top-logout").onclick = () => logout(false);
@@ -16878,8 +16895,11 @@ if (location.hash.startsWith("#accesso=")) {
 }
 // Schermata d'accesso unica: il pannello non ne ha una sua, si accede da /dashboard (utenti e
 // amministratori); le credenziali di un amministratore riportano qui per i passaggi successivi.
-function showLogin(message) {
-  try { if (message) sessionStorage.setItem("netmon.loginmsg", message); } catch {}
+function showLogin(message, neutral = false) {
+  try {
+    if (message) sessionStorage.setItem("netmon.loginmsg", message);
+    if (neutral) sessionStorage.setItem("netmon.loginmsg.ok", "1"); else sessionStorage.removeItem("netmon.loginmsg.ok");
+  } catch {}
   const login = $("#al-login").value.trim();
   location.replace("/dashboard" + (login ? "#accesso=" + encodeURIComponent(login) : ""));
 }
@@ -17028,7 +17048,7 @@ $("#pwc-form").onsubmit = async e => {
 
 async function logout() {
   try { await api("/api/admin/auth/logout", {}); } catch {}
-  showLogin("Sei uscito dall'amministrazione.");
+  showLogin("Sei uscito dall'amministrazione.", true);
 }
 $("#pwc-logout").onclick = logout;
 $("#logout").onclick = logout;
