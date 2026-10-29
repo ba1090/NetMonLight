@@ -7,8 +7,12 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-170000 · 8 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-180000 · 9 versioni) — NetMon Light
 
+- **Sonde più nuove del server** (da NetMon): una sonda con programmi più recenti di quelli che il server
+  distribuisce (per esempio aggiornata a mano con un pacchetto più nuovo) risulta aggiornata: niente più
+  *Aggiorna netmon* nella dashboard, *da aggiornare* nel pannello o aggiornamenti programmati che la sonda
+  rifiuterebbe comunque. *Server, pagina utente, pannello.*
 - **Chiave di firma delle sonde nel backup completo**: il backup del pannello contiene anche la chiave con cui la
   VM firma gli aggiornamenti delle sonde, e il ripristino la rimette (con i programmi delle sonde rifirmati).
   Spostando il server su una VM nuova con *Backup e ripristino*, le sonde continuano ad aggiornarsi dal

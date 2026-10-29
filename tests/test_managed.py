@@ -109,3 +109,14 @@ def test_admin_list_marks_managed(probes, admin):
     by_key = {p["key"]: p for p in r.json()["probes"]}
     assert by_key[gestita.key]["managed_by"] == NAME
     assert by_key[sola.key]["managed_by"] is None
+
+
+def test_probe_newer_than_server_counts_as_current(monkeypatch):
+    """Una sonda con programmi più nuovi di quelli del server (aggiornata altrove) non è «da aggiornare»:
+    tornare indietro la sonda lo rifiuterebbe comunque."""
+    monkeypatch.setattr(netmon, "probe_dist_version", lambda: "1.1.20261029-120000")
+    monkeypatch.setattr(netmon, "probe_dist_same", lambda: set())
+    assert netmon.probe_is_current("1.1.20261029-120000")
+    assert netmon.probe_is_current("1.1.20261030-080000")
+    assert not netmon.probe_is_current("1.1.20261028-230000")
+    assert not netmon.probe_is_current("") and not netmon.probe_is_current(None)

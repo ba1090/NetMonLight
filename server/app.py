@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-170000"
+__version__ = "1.1.20261029-180000"
 VERSION = __version__
 import asyncio
 import base64
@@ -8272,8 +8272,11 @@ def probe_dist_same():
 
 
 def probe_is_current(version) -> bool:
+    """La sonda ha già i programmi di questo server, o più nuovi (per esempio arrivata da un server
+    aggiornato dopo): non le si chiede di tornare indietro, che verrebbe comunque rifiutato."""
     dist = probe_dist_version()
-    return bool(dist) and (version == dist or version in probe_dist_same())
+    return bool(dist) and (version == dist or version in probe_dist_same()
+                           or (bool(version) and pkgcheck.version_key(version) > pkgcheck.version_key(dist)))
 
 
 # Sonda gestita da un altro sistema (per esempio un'app che la contiene): lo dice lei, con il nome del
@@ -9162,7 +9165,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-170000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-180000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -11397,6 +11400,9 @@ function renderPi(d) {
 
 // ---- manutenzione della sonda: aggiornamento e riavvio a distanza ----
 const openLogs = new Set();          // registri aperti, da mantenere tra un aggiornamento e l'altro
+// confronto tra versioni 1.1.AAAAMMGG-hhmmss: una sonda più nuova del server è già aggiornata
+const verNewer = (a, b) => { const x = String(a || "").match(/\d+/g) || [], y = String(b || "").match(/\d+/g) || [];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d > 0; } return false; };
 const when = ts => ts ? new Date(ts * 1000).toLocaleString(I18N.locale,
   { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
@@ -11442,7 +11448,8 @@ function maintenanceBlock(p) {
 
   const acts = el("div", "ev-actions");
   // già aggiornata anche con una versione precedente, se i programmi della sonda sono identici
-  const dist = data.probe_dist_version, same = dist && (s.version === dist || (data.probe_dist_same || []).includes(s.version));
+  const dist = data.probe_dist_version, same = dist && (s.version === dist || (data.probe_dist_same || []).includes(s.version)
+    || verNewer(s.version, dist));
   const bNm = el("button", same ? "" : "primary", same ? "netmon aggiornato" : "Aggiorna netmon" + (dist ? " (" + dist + ")" : ""));
   const bUp = el("button", "", "Aggiorna sistema"), bRb = el("button", "danger", "Riavvia sonda");
   bNm.type = bUp.type = bRb.type = "button";
@@ -18276,7 +18283,7 @@ function renderProbes() {
   const online = res.probes.filter(p => p.state === "online").length;
   // aggiornata = versione del server, oppure una precedente con i programmi della sonda identici
   const same = res.dist_same || [];
-  const isOldP = p => !!dist && p.version !== dist && !same.includes(p.version);
+  const isOldP = p => !!dist && p.version !== dist && !same.includes(p.version) && !verNewer(p.version, dist);
   const old = res.probes.filter(isOldP).length;
   $("#pr-count").dataset.base = `${res.probes.length} sonde · ${online} in linea` + (old ? ` · ${old} da aggiornare` : "");
   if (!res.probes.length) { const tr = el("tr"); cell(tr, "Nessuna sonda collegata a un account.", "adm-empty").colSpan = 7; tb.appendChild(tr); }
@@ -18505,6 +18512,9 @@ function fmtUptime(sec) {
   const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
   return d ? `${d} g ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
 }
+// confronto tra versioni 1.1.AAAAMMGG-hhmmss: una sonda più nuova del server è già aggiornata
+const verNewer = (a, b) => { const x = String(a || "").match(/\d+/g) || [], y = String(b || "").match(/\d+/g) || [];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d > 0; } return false; };
 const whenVm = ts => ts ? new Date(ts * 1000).toLocaleString(LOC,
   { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 const pctOf = (used, total) => total ? Math.round(100 * used / total) : null;

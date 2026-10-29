@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-170000"
+__version__ = "1.1.20261029-180000"
 import json
 import re
 

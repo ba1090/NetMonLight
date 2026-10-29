@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261029-170000
+# netmon versione 1.1.20261029-180000
 [Unit]
 Description=netmon - pagina web di configurazione della sonda
 # Parte solo quando qualcuno apre la pagina (netmon-config.socket) e si chiude da sola dopo

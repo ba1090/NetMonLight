@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261029-170000
+# netmon versione 1.1.20261029-180000
 # Rollback dell'ultimo aggiornamento di netmon sulla VM.
 # Installazione: sudo install -m 755 -o root -g root netmon-vm-rollback /usr/local/sbin/
 # Alla fine di ogni installazione riuscita, netmon-vm-selfupdate scrive
