@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-110000"
+__version__ = "1.1.20261029-120000"
 VERSION = __version__
 import asyncio
 import base64
@@ -277,6 +277,7 @@ class Report(BaseModel):
     command_status: Optional[dict[str, Any]] = None   # esito di riavvio/aggiornamento richiesti
     speedtest: Optional[dict[str, Any]] = None        # risultato dello speedtest chiesto dalla pagina
     scan: Optional[dict[str, Any]] = None             # risultato del controllo di sicurezza di un dispositivo
+    server_change: Optional[dict[str, Any]] = None    # esito del cambio di indirizzo del server chiesto dalla pagina
     # Le sonde vecchie inviano solo True/False, quelle nuove anche IP e RTT
     devices: dict[str, Union[DeviceInfo, bool]] = Field(max_length=MAX_DEVICES)
 
@@ -333,6 +334,16 @@ class ProbeWifi(BaseModel):
     psk: str = Field(default="", max_length=64)
     hidden: bool = False
     password: str = Field(max_length=256)
+
+
+class ProbeServerBody(BaseModel):
+    probe: str
+    url: str = Field(min_length=3, max_length=300)
+    password: str = Field(max_length=256)
+
+
+class ProbeServerCancel(BaseModel):
+    probe: str
 
 
 class EventsDelete(BaseModel):
@@ -2527,6 +2538,14 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
         if scan_text:
             await asyncio.to_thread(scan_notify, key, p, scan_event[0], scan_text, scan_event[1])
 
+    sc_ack, sc_event = None, None
+    if r.server_change is not None:
+        async with lock:
+            sc_ack, sc_event = apply_server_change(key, p, r.server_change)
+            save_state()
+    if sc_event:
+        await asyncio.to_thread(add_event, sc_event[0], "", sc_event[1], key)
+
     ack, event = None, None
     if r.command_status is not None:
         async with lock:
@@ -2561,6 +2580,10 @@ async def report(r: Report, authorization: str = Header(default=""), x_netmon_in
         reply["scan"] = scan
     if porte:
         reply["port_check"] = porte
+    if sc_ack:
+        reply["server_change_ack"] = sc_ack
+    if change := pending_server_change(p):
+        reply["server_change"] = change
     return reply
 
 
@@ -3206,7 +3229,10 @@ async def api_probes(user: dict = Depends(ui_user)):
                     "connected": p is not None, "last_seen": p.get("last_seen") if p else None,
                     "paused": bool(pausa),
                     "paused_until": fmt_when(pausa["until"]) if pausa and pausa["until"] else None,
-                    "paused_note": pausa["note"] if pausa else ""})
+                    "paused_note": pausa["note"] if pausa else "",
+                    "server_change": server_change_public(p),
+                    "can_server": bool(p and (p.get("system") or {}).get("server_change") and not probe_managed_by(p)),
+                    "managed": probe_managed_by(p) if p else ""})
     lim = await asyncio.to_thread(limits_of_user, user["id"])
     # limit e count servono alla pagina per dire «ne puoi collegare ancora N»
     auto = await asyncio.to_thread(auth.get_probe_auto, user["id"])
@@ -8050,11 +8076,126 @@ def probe_is_current(version) -> bool:
 # Sonda gestita da un altro sistema (per esempio un'app che la contiene): lo dice lei, con il nome del
 # sistema in system.managed_by. Aggiornamenti, riavvio e reti Wi-Fi li fa quel sistema: il server non
 # glieli manda (fallirebbero sempre) e dice dove farli.
+# ---- indirizzo del server a cui scrive la sonda, cambiato dalla pagina dell'utente ----------------
+# La sonda prova il nuovo indirizzo con il suo token PRIMA di passarci: se quel server non la
+# riconosce resta dov'è e lo dice. Così un indirizzo sbagliato non la scollega.
+SERVER_CHANGE_TIMEOUT = 1800                 # secondi: oltre, la richiesta non eseguita scade
+LOCAL_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain", ".fritz.box")
+SERVER_HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)*$")
+
+
+def probe_server_url(raw):
+    """Indirizzo dei report dato un dominio o un indirizzo: https://dominio/api/report. http:// solo
+    verso la rete di casa (altrimenti il token viaggerebbe in chiaro su Internet)."""
+    raw = raw.strip()
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        u = urlsplit(raw)
+        port = u.port
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Indirizzo non valido.")
+    host = (u.hostname or "").lower()
+    if u.scheme not in ("http", "https") or not host or u.username or u.password or u.query or u.fragment:
+        raise HTTPException(status_code=422, detail="Indirizzo non valido: scrivi il dominio del server, per esempio netmonhome.net.")
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+        local = ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        if not SERVER_HOST_RE.match(host) or len(host) > 253:
+            raise HTTPException(status_code=422, detail="Indirizzo non valido: scrivi il dominio del server, per esempio netmonhome.net.")
+        local = host == "localhost" or host.endswith(LOCAL_SUFFIXES)
+    if u.scheme == "http" and not local:
+        raise HTTPException(status_code=422, detail="Per un server su Internet serve https://: con http:// il token viaggerebbe in chiaro.")
+    path = (u.path or "").rstrip("/")
+    if not path.endswith("/api/report"):
+        path += "/api/report"
+    hostpart = f"[{host}]" if ":" in host else host
+    return f"{u.scheme}://{hostpart}{f':{port}' if port else ''}{path}"
+
+
+def pending_server_change(p):
+    """Richiesta da consegnare alla sonda ({"id", "url"}), o None. Una scaduta diventa un errore."""
+    sc = p.get("server_change") or {}
+    if sc.get("state") != "pending":
+        return None
+    if time.time() - float(sc.get("requested") or 0) > SERVER_CHANGE_TIMEOUT:
+        sc.update(state="error", finished=time.time(), error="la sonda non ha risposto in tempo")
+        return None
+    return {"id": sc["id"], "url": sc["url"]}
+
+
+def apply_server_change(key, p, st):
+    """Esito inviato dalla sonda. Restituisce (id da confermare, evento o None)."""
+    sc = p.get("server_change") or {}
+    if not isinstance(st, dict) or not sc or st.get("id") != sc.get("id"):
+        return (st.get("id") if isinstance(st, dict) else None), None
+    if sc.get("state") != "pending":
+        return sc["id"], None
+    ok = st.get("ok") is True
+    sc.update(state="done" if ok else "error", finished=time.time(), error="" if ok else str(st.get("error") or "non riuscito")[:200])
+    host = urlsplit(sc["url"]).netloc
+    if ok:
+        return sc["id"], (f"[INFO] La sonda '{label_of(key, p)}' ora invia i dati a {host}", True)
+    return sc["id"], (f"[ALERT] La sonda '{label_of(key, p)}' resta su questo server: {host} non l'ha accettata ({sc['error']})", False)
+
+
+def server_change_public(p):
+    sc = (p or {}).get("server_change")
+    if not sc:
+        return None
+    pending_server_change(p)
+    return {k: sc.get(k) for k in ("state", "url", "error", "requested", "finished")}
+
+
+@app.post("/api/probes/server")
+async def api_probe_server(b: ProbeServerBody, request: Request, user: dict = Depends(ui_user)):
+    """Nuovo indirizzo del server per la sonda. Serve la password dell'account: chi cambia l'indirizzo
+    decide dove va il token della sonda."""
+    if registry.owner_of(b.probe) != user["id"]:
+        raise HTTPException(status_code=404, detail="sonda non trovata")
+    ip = client_ip(request)
+    too_many("ip:" + ip, "uid:%d" % user["id"])
+    if not await asyncio.to_thread(auth.check_password, user["id"], b.password):
+        throttle.fail("ip:" + ip, "uid:%d" % user["id"])
+        raise HTTPException(status_code=401, detail="La password non è corretta.")
+    url = probe_server_url(b.url)
+    async with lock:
+        p = monitor.state.get(b.probe)
+        if p is None:
+            raise HTTPException(status_code=404, detail="La sonda non ha ancora mandato dati: collegala prima a questo server.")
+        if probe_managed_by(p):
+            raise HTTPException(status_code=409, detail=MANAGED_TEXT["server"](probe_managed_by(p)))
+        if not (p.get("system") or {}).get("server_change"):
+            raise HTTPException(status_code=409, detail="Per cambiare l'indirizzo da qui aggiorna netmon sulla sonda.")
+        if pending_server_change(p):
+            raise HTTPException(status_code=409, detail="C'è già un cambio di indirizzo in corso per questa sonda.")
+        p["server_change"] = {"id": secrets.token_hex(8), "url": url, "state": "pending", "requested": time.time(),
+                              "by": user.get("email")}
+        save_state()
+    log.info("Nuovo indirizzo del server (%s) chiesto per la sonda %s da %s", url, b.probe, user.get("email"))
+    return {"ok": True, "url": url}
+
+
+@app.post("/api/probes/server-cancel")
+async def api_probe_server_cancel(b: ProbeServerCancel, user: dict = Depends(ui_user)):
+    """Annulla un cambio di indirizzo che la sonda non ha ancora preso in carico."""
+    owns(user, b.probe)
+    async with lock:
+        p = monitor.state.get(b.probe)
+        if not p or not pending_server_change(p):
+            raise HTTPException(status_code=409, detail="Nessun cambio di indirizzo in attesa.")
+        p.pop("server_change", None)
+        save_state()
+    return {"ok": True}
+
+
 MANAGED_TEXT = {
     "update": lambda n: f"La sonda è gestita da {n}: netmon si aggiorna da lì.",
     "upgrade": lambda n: f"La sonda è gestita da {n}: il sistema si aggiorna da lì.",
     "reboot": lambda n: f"La sonda è gestita da {n}: si riavvia da lì.",
     "wifi": lambda n: f"La sonda è gestita da {n}: le reti Wi-Fi si gestiscono da lì.",
+    "server": lambda n: f"La sonda è gestita da {n}: l'indirizzo del server si cambia da lì.",
 }
 
 
@@ -8818,7 +8959,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-110000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-120000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -9662,6 +9803,8 @@ svg.ico{width:18px;height:18px;display:block;flex:none;stroke:currentColor;fill:
 .pr-top .ev-actions button{padding:5px 10px;font-size:.86rem}
 .pr-edit{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
 .pr-edit input{max-width:260px}
+.pr-srv{margin-top:8px;font-size:.88rem;color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pr-srv.bad{color:var(--bad)}
 .newtoken{border:1px solid var(--warn);border-radius:8px;padding:12px;margin:0 0 16px;background:var(--field)}
 .newtoken p{margin:0 0 8px !important;color:var(--ink) !important;font-size:.9rem !important}
 .newtoken .login-row{margin-bottom:8px}
@@ -14932,8 +15075,9 @@ function probeRow(p) {
   const acts = el("span", "ev-actions");
   const bPau = el("button", "", p.paused ? "Riprendi" : "Metti in pausa");
   const bRen = el("button", "", "Rinomina"), bCol = el("button", "", "Colore"), bWifi = el("button", "", "Reti Wi-Fi"),
+        bSrv = el("button", "", "Indirizzo del server"),
         bTok = el("button", "", "Nuovo token"), bDel = el("button", "danger", "Elimina");
-  const tutti = p.connected ? [bPau, bRen, bCol, bWifi, bTok, bDel] : [bPau, bRen, bCol, bTok, bDel];
+  const tutti = p.connected ? [bPau, bRen, bCol, bWifi, bSrv, bTok, bDel] : [bPau, bRen, bCol, bTok, bDel];
   tutti.forEach(b => { b.type = "button"; });
   acts.append(...tutti);
   // stessi comandi in un menu «Azioni ▾», usato quando in linea non stanno su una riga
@@ -14960,6 +15104,23 @@ function probeRow(p) {
   if (p.paused) nome.appendChild(el("span", "tag warn", "in pausa"));
   top.append(nome, el("span", "txt", p.paused ? pausaTesto(p) : state), acts, menuWrap);
   row.appendChild(top);
+  // cambio dell'indirizzo del server: in attesa, riuscito o no
+  const sc = p.server_change;
+  if (sc && sc.state) {
+    const host = (() => { try { return new URL(sc.url).host; } catch { return sc.url; } })();
+    const note = el("div", "pr-srv" + (sc.state === "error" ? " bad" : ""));
+    if (sc.state === "pending") {
+      note.append(el("span", "", `Nuovo indirizzo del server: ${host}. La sonda lo prova al prossimo controllo e ci passa solo se quel server la riconosce.`));
+      const ann = el("button", "", "Annulla"); ann.type = "button";
+      ann.onclick = async () => {
+        try { await postJSON("/api/probes/server-cancel", { probe: p.key }); prMsg("Cambio di indirizzo annullato."); loadProbes(); }
+        catch (e) { prMsg(e.message, true); }
+      };
+      note.append(" ", ann);
+    } else if (sc.state === "done") note.textContent = `La sonda ora invia i dati a ${host} (${when(sc.finished)}).`;
+    else note.textContent = `Indirizzo ${host} non usato: ${sc.error || "non riuscito"}. La sonda resta su questo server.`;
+    row.appendChild(note);
+  }
   prFit.observe(row);
   const edit = el("div", "pr-edit"); edit.hidden = true; row.appendChild(edit);
   const openEdit = (kind) => {
@@ -15004,6 +15165,31 @@ function probeRow(p) {
   bRen.onclick = () => openEdit("ren");
   bDel.onclick = () => openEdit("del");
   bWifi.onclick = () => openWifiNets(p.key);
+  // Indirizzo del server: dove la sonda manda i dati. Serve la password; la sonda prova il nuovo
+  // indirizzo prima di passarci, quindi uno sbagliato non la scollega.
+  bSrv.onclick = () => {
+    if (!p.can_server) {
+      prMsg(p.managed ? `La sonda è gestita da ${p.managed}: l'indirizzo del server si cambia da lì.`
+                      : "Per cambiare l'indirizzo da qui aggiorna netmon sulla sonda.", true);
+      return;
+    }
+    edit.innerHTML = ""; edit.hidden = false;
+    const url = el("input", "mono"), pw = el("input"), ok = el("button", "primary", "Cambia indirizzo"), no = el("button", "", "Annulla");
+    url.placeholder = "netmonhome.net"; url.setAttribute("aria-label", "Nuovo indirizzo del server"); url.maxLength = 300;
+    pw.type = "password"; pw.placeholder = "La tua password"; pw.autocomplete = "current-password";
+    pw.setAttribute("aria-label", "La tua password");
+    ok.type = no.type = "button";
+    no.onclick = () => { edit.hidden = true; };
+    ok.onclick = async () => {
+      try {
+        const res = await postJSON("/api/probes/server", { probe: p.key, url: url.value.trim(), password: pw.value });
+        prMsg(`Richiesta inviata: «${p.label}» proverà ${res.url} al prossimo controllo.`);
+        edit.hidden = true; loadProbes();
+      } catch (e) { prMsg(e.message, true); }
+    };
+    edit.append(el("span", "hint", "Dominio del server a cui la sonda deve mandare i dati:"), url, pw, ok, no);
+    url.focus();
+  };
   // Colore: 8 colori oppure automatico (secondo la posizione della sonda); salvato subito nell'account
   bCol.onclick = () => {
     edit.innerHTML = ""; edit.hidden = false;

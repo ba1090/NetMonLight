@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-110000"
+__version__ = "1.1.20261029-120000"
 import json
 import re
 
@@ -4920,6 +4920,36 @@ for _it, _tr in {
                                          "Tu t'es déconnecté de l'administration."),
     "La sessione è scaduta: accedi di nuovo.": ("Your session has expired: sign in again.", "Die Sitzung ist abgelaufen: melde dich erneut an.",
                                                 "La session a expiré : reconnecte-toi."),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+# Indirizzo del server della sonda cambiato dalla pagina dell'utente
+for _it, _tr in {
+    "Indirizzo del server": ("Server address", "Serveradresse", "Adresse du serveur"),
+    "Cambia indirizzo": ("Change address", "Adresse ändern", "Changer l'adresse"),
+    "Nuovo indirizzo del server": ("New server address", "Neue Serveradresse", "Nouvelle adresse du serveur"),
+    "Dominio del server a cui la sonda deve mandare i dati:": ("Domain of the server the probe should send its data to:", "Domain des Servers, an den die Sonde ihre Daten senden soll:", "Domaine du serveur auquel la sonde doit envoyer ses données :"),
+    "C'è già un cambio di indirizzo in corso per questa sonda.": ("An address change is already in progress for this probe.", "Für diese Sonde läuft bereits ein Adresswechsel.", "Un changement d'adresse est déjà en cours pour cette sonde."),
+    "Cambio di indirizzo annullato.": ("Address change cancelled.", "Adresswechsel abgebrochen.", "Changement d'adresse annulé."),
+    "Nessun cambio di indirizzo in attesa.": ("No pending address change.", "Kein ausstehender Adresswechsel.", "Aucun changement d'adresse en attente."),
+    "Indirizzo non valido.": ("Invalid address.", "Ungültige Adresse.", "Adresse non valide."),
+    "Indirizzo non valido: scrivi il dominio del server, per esempio netmonhome.net.": ("Invalid address: enter the server's domain, for example netmonhome.net.", "Ungültige Adresse: gib die Domain des Servers ein, zum Beispiel netmonhome.net.", "Adresse non valide : saisis le domaine du serveur, par exemple netmonhome.net."),
+    "Per un server su Internet serve https://: con http:// il token viaggerebbe in chiaro.": ("A server on the Internet needs https://: with http:// the token would travel unencrypted.", "Ein Server im Internet braucht https://: mit http:// würde das Token unverschlüsselt übertragen.", "Un serveur sur Internet exige https:// : avec http:// le jeton circulerait en clair."),
+    "La sonda non ha ancora mandato dati: collegala prima a questo server.": ("The probe hasn't sent any data yet: connect it to this server first.", "Die Sonde hat noch keine Daten gesendet: verbinde sie zuerst mit diesem Server.", "La sonde n'a encore envoyé aucune donnée : connecte-la d'abord à ce serveur."),
+    "La sonda è gestita da {0}: l'indirizzo del server si cambia da lì.": ("The probe is managed by {0}: the server address is changed there.", "Die Sonde wird von {0} verwaltet: die Serveradresse wird dort geändert.", "La sonde est gérée par {0} : l'adresse du serveur se change là-bas."),
+    "Per cambiare l'indirizzo da qui aggiorna netmon sulla sonda.": ("To change the address from here, update netmon on the probe.", "Um die Adresse von hier zu ändern, aktualisiere netmon auf der Sonde.", "Pour changer l'adresse d'ici, mets à jour netmon sur la sonde."),
+    "Nuovo indirizzo del server: {0}. La sonda lo prova al prossimo controllo e ci passa solo se quel server la riconosce.": ("New server address: {0}. The probe tries it at the next check and switches only if that server recognises it.", "Neue Serveradresse: {0}. Die Sonde testet sie bei der nächsten Prüfung und wechselt nur, wenn dieser Server sie erkennt.", "Nouvelle adresse du serveur : {0}. La sonde l'essaie au prochain contrôle et ne bascule que si ce serveur la reconnaît."),
+    "La sonda ora invia i dati a {0} ({1}).": ("The probe now sends its data to {0} ({1}).", "Die Sonde sendet ihre Daten jetzt an {0} ({1}).", "La sonde envoie maintenant ses données à {0} ({1})."),
+    "Indirizzo {0} non usato: {1}. La sonda resta su questo server.": ("Address {0} not used: {1}. The probe stays on this server.", "Adresse {0} nicht verwendet: {1}. Die Sonde bleibt auf diesem Server.", "Adresse {0} non utilisée : {1}. La sonde reste sur ce serveur."),
+    "Richiesta inviata: «{0}» proverà {1} al prossimo controllo.": ("Request sent: “{0}” will try {1} at the next check.", "Anfrage gesendet: „{0}“ testet {1} bei der nächsten Prüfung.", "Demande envoyée : « {0} » essaiera {1} au prochain contrôle."),
+    "La sonda '{0}' ora invia i dati a {1}": ("Probe '{0}' now sends its data to {1}", "Sonde '{0}' sendet ihre Daten jetzt an {1}", "La sonde '{0}' envoie maintenant ses données à {1}"),
+    "La sonda '{0}' resta su questo server: {1} non l'ha accettata ({2})": ("Probe '{0}' stays on this server: {1} did not accept it ({2})", "Sonde '{0}' bleibt auf diesem Server: {1} hat sie nicht akzeptiert ({2})", "La sonde '{0}' reste sur ce serveur : {1} ne l'a pas acceptée ({2})"),
+    "la sonda non ha risposto in tempo": ("the probe did not answer in time", "die Sonde hat nicht rechtzeitig geantwortet", "la sonde n'a pas répondu à temps"),
+    "quel server non riconosce il token di questa sonda": ("that server does not recognise this probe's token", "dieser Server erkennt das Token dieser Sonde nicht", "ce serveur ne reconnaît pas le jeton de cette sonde"),
+    "a quell'indirizzo non risponde un server netmon": ("no netmon server answers at that address", "unter dieser Adresse antwortet kein netmon-Server", "aucun serveur netmon ne répond à cette adresse"),
+    "server non raggiungibile ({0})": ("server unreachable ({0})", "Server nicht erreichbar ({0})", "serveur injoignable ({0})"),
+    "quel server dice che la sonda appartiene a {0}": ("that server says the probe belongs to {0}", "dieser Server sagt, die Sonde gehört zu {0}", "ce serveur dit que la sonde appartient à {0}"),
+    "indirizzo non valido (serve https://; http:// solo nella rete di casa)": ("invalid address (https:// required; http:// only on the home network)", "ungültige Adresse (https:// nötig; http:// nur im Heimnetz)", "adresse non valide (https:// requis ; http:// seulement sur le réseau domestique)"),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)

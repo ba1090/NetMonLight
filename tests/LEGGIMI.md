@@ -29,5 +29,6 @@ python tests/stress/stress.py sustained --seconds 7200 --out /tmp/netmon-stress 
 | `scenarios/test_transfer_crypto.py` | export cifrato degli utenti: si apre solo con la sua password, un file modificato viene rifiutato, gli zip in chiaro delle versioni di prima si importano ancora |
 | `scenarios/test_restart_grace.py` | 5 minuti di tolleranza dopo aggiornamento o ripartenza della sonda: «in ripartenza» invece di «in ritardo», poi le soglie di sempre |
 | `scenarios/test_portcheck.py` | porte provate quando il ping fallisce: solo per i dispositivi scelti e con le porte dell'ultimo controllo; una porta che risponde evita l'avviso, una mai vista aperta no; la sonda prova solo la rete di casa |
+| `scenarios/test_server_change.py` | indirizzo del server cambiato dalla pagina: password, solo `https://` verso Internet, sonde gestite o vecchie rifiutate; la sonda prova il nuovo indirizzo con il suo token e ci passa solo se accettata, dopo averlo detto al server attuale |
 | `scenarios/test_usecases.py` | dall'account con 0 sonde a quello con 50 sonde, 1000 dispositivi e 10 FRITZ!Box; piani basso/medio/alto |
 | `stress/` | carico realistico e prolungato, raffiche di accessi, corpi enormi, ritorno in massa delle sonde, storico di 30 giorni |

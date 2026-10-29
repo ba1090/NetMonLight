@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261029-110000
+# netmon versione 1.1.20261029-120000
 # netmon · permessi del server (utente netmon): solo riavvio, aggiornamento dei pacchetti della VM e
 # installazione di un pacchetto netmon.zip caricato, usati dal pannello di amministrazione (/admin,
 # scheda Stato VM). Nient'altro.

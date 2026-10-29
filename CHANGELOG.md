@@ -7,8 +7,16 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-110000 · 3 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-120000 · 4 versioni) — NetMon Light
 
+- **Indirizzo del server della sonda cambiato dalla pagina** (da NetMon): in *Impostazioni → Sonde* il nuovo
+  comando *Indirizzo del server* (con la password dell'account) manda la sonda a un altro server, per esempio
+  dopo un cambio di dominio o un backup completo ripristinato su un'altra VM. La sonda prova il nuovo indirizzo
+  con il suo token e ci passa solo se quel server la riconosce, dopo averlo detto a quello attuale; altrimenti
+  resta dov'è e la pagina dice il motivo. Solo `https://` verso Internet (`http://` nella rete di casa),
+  *Annulla* finché la sonda non l'ha presa in carico, scadenza dopo 30 minuti. Non vale per le sonde gestite da
+  un altro sistema (Home Assistant: opzioni dell'add-on). Serve la sonda aggiornata. *Sonda, pagina utente,
+  server.*
 - **Una sola schermata d'accesso per utenti e amministratori**: il modulo *Accedi* di `/dashboard` riconosce
   l'utenza. Le credenziali di un utente aprono la dashboard, quelle di un amministratore portano al pannello
   `/admin`, che prosegue con il codice dell'app o con il cambio della password provvisoria. Tentativi e blocchi

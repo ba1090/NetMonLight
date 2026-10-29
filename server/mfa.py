@@ -7,7 +7,7 @@
 Nessuna dipendenza obbligatoria: il QR code usa la libreria `segno` se installata, altrimenti
 la pagina mostra solo la chiave da inserire a mano nell'app.
 """
-__version__ = "1.1.20261029-110000"
+__version__ = "1.1.20261029-120000"
 import base64
 import hashlib
 import hmac

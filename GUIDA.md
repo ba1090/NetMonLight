@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-110000*
+*Versione di netmon: 1.1.20261029-120000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -850,7 +850,9 @@ dimensione si cambiano con *Ordine*:
   larghe; nel piccolo restano solo nomi e caselle (la percentuale è nel suggerimento della riga). **Verde**: tutti i ping risposti; **giallo**: qualche ping perso; **rosso**: nessuna risposta;
   **grigio**: nessun dato (dispositivo in pausa, sonda spenta, dispositivo appena aggiunto). A destra la
   percentuale di ping risposti nel periodo, gialla sotto il 99% e rossa sotto il 95%. Un tocco su una
-  casella apre lo storico dei ping di quel dispositivo in quel momento. Il pulsante **Dispositivi** sceglie
+  casella apre lo storico dei ping di quel dispositivo in quel momento. Sotto le caselle gli orari (*24 ore*) o i
+  giorni (*7 giorni*): quando lo spazio è poco (telefono, riquadro piccolo) ne restano meno, senza mai
+  sovrapporsi, e *ora* c'è sempre. Il pulsante **Dispositivi** sceglie
   quali seguire (con *Tutti*, *Solo priorità Alta*, *Nessuno*); finché non scegli, sono quelli a
   priorità *Alta*. Scelta e periodo restano nel tuo account.
 
@@ -1942,6 +1944,17 @@ l'identificativo, non vengono controllate.
 
 **Impostazioni → Sonde**:
 
+- **Indirizzo del server**: dove la sonda manda i dati. Scrivi il dominio del nuovo server (per esempio
+  `netmonhome.net`; diventa `https://netmonhome.net/api/report`) e la tua password. Al controllo
+  successivo la sonda **prova il nuovo indirizzo con il suo token**: se quel server la riconosce lo dice a questo
+  server e ci passa (riga *La sonda ora invia i dati a …* e un evento *[INFO]*), altrimenti resta qui e la riga
+  dice il motivo (*quel server non riconosce il token*, *non raggiungibile*…), con un evento *[ALERT]*. Un
+  indirizzo sbagliato quindi non la scollega. Serve `https://` (`http://` solo per un server nella rete di
+  casa); finché la sonda non l'ha presa in carico, **Annulla** toglie la richiesta (dopo 30 minuti senza
+  risposta scade). Il token resta lo stesso: il nuovo server deve conoscerlo, come succede con un cambio di
+  dominio, con un backup completo ripristinato su un'altra VM o con un utente importato (*Esporta* /
+  *Importa un utente*). Non c'è per le sonde gestite da un altro sistema (su Home Assistant l'indirizzo si
+  cambia nelle opzioni dell'add-on) e serve la sonda aggiornata.
 - **Scarica lo zip della sonda** (link sotto *Crea sonda*, oppure `/scarica-sonda`): il programma da
   installare sulla sonda, solo la parte della sonda e sempre nella versione installata sul server.
   Si scarica solo dopo l'accesso; il link è anche nell'email d'invito (aperto senza accesso, porta
@@ -2079,7 +2092,9 @@ sudo systemctl start netmon-server
 
 **Su una VM nuova**: installa netmon con `installa-server.sh` (chiede dominio, email e amministratore come
 sempre), accedi a `/admin` con l'amministratore appena creato e ripristina il backup. Le sonde continuano con il
-loro token se il dominio è lo stesso (il record DNS va spostato sulla VM nuova). La VM nuova ha una sua chiave
+loro token se il dominio è lo stesso (il record DNS va spostato sulla VM nuova). Con un dominio diverso, finché
+la vecchia VM è accesa ogni utente entra lì e in *Impostazioni → Sonde → Indirizzo del server* scrive il nuovo
+dominio: la sonda prova la VM nuova con il suo token e ci passa da sola. La VM nuova ha una sua chiave
 per gli aggiornamenti delle sonde: prima di aggiornarle dal pannello, su ogni sonda lancia una volta
 `sudo bash ~/netmon/probe/installa-sonda.sh --aggiorna` e accetta la nuova impronta. Il bot Telegram va rimesso
 nel `.env` (o con *Riconfigurare* dell'installatore).
@@ -2276,7 +2291,8 @@ Per esempio da `netmon-public.com` a `netmonhome.net`. Le sonde stanno a casa de
 L'installatore scrive i nomi precedenti in `OLD_HOSTS` nel `.env` e li lascia nel Caddyfile accanto a quello
 nuovo, con il loro certificato. Chi arriva a un vecchio nome è rimandato al nuovo indirizzo: i browser con un
 reindirizzamento permanente (gli utenti rientrano una volta, perché la sessione vale per il nome), le sonde con
-una risposta «spostata» (410 con il nuovo indirizzo), e scrivono il nuovo indirizzo in `config.yaml` da sole.
+una risposta «spostata» (410 con il nuovo indirizzo), e scrivono il nuovo indirizzo in `config.yaml` da sole
+(ogni utente può anche cambiarlo dalla pagina, *Impostazioni → Sonde → Indirizzo del server*).
 Vale per le sonde con i programmi dal 13 ottobre 2026 (pomeriggio) in poi; le più vecchie si aggiornano prima,
 oppure si cambia l'indirizzo a mano (`installa-sonda.sh`, **2) Riconfigurare**). Il record DNS vecchio si
 toglie quando in *Sonde › Elenco sonde* tutte le sonde scrivono di nuovo: allora cancella la riga `OLD_HOSTS=`
