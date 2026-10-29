@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-093000"
+__version__ = "1.1.20261029-110000"
 VERSION = __version__
 import asyncio
 import base64
@@ -2866,6 +2866,15 @@ async def auth_login(b: LoginBody, request: Request):
     too_many("ip:" + ip)
     too_many(pair, limiter=account_throttle)
     uid = await asyncio.to_thread(auth.verify_login, email, b.password)
+    if uid is None and await asyncio.to_thread(auth.is_admin_email, email):
+        # Schermata d'accesso unica: credenziali di un amministratore -> si prosegue nel pannello
+        # (codice dell'app, cambio della password provvisoria). Tentativi e blocchi sono quelli
+        # dell'accesso al pannello; se non va, l'errore conta anche come tentativo da utente.
+        try:
+            return await admin_password_step(email, b.password, request, {"redirect": "/admin"})
+        except HTTPException as e:
+            if e.status_code != 401:
+                raise
     if uid is None:
         throttle.fail("ip:" + ip)
         account_throttle.fail(pair)
@@ -3675,8 +3684,9 @@ def set_admin_cookie(response, request: Request, raw: str):
 
 
 def set_trust_cookie(response, raw: str):
+    # path /api: lo legge anche la schermata d'accesso unica (/api/auth/login), non solo il pannello
     response.set_cookie(ADMIN_TRUST_COOKIE, raw, max_age=ADMIN_TRUST_DAYS * 86400, httponly=True,
-                        secure=COOKIE_SECURE, samesite="strict", path="/api/admin")
+                        secure=COOKIE_SECURE, samesite="strict", path="/api")
 
 
 def admin_state_body(adm):
@@ -3779,12 +3789,18 @@ async def admin_state(request: Request):
 
 @app.post("/api/admin/auth/login")
 async def admin_login(b: AdminLogin, request: Request):
-    ip, login = client_ip(request), normalize_email(b.login)
+    return await admin_password_step(b.login, b.password, request)
+
+
+async def admin_password_step(login_in: str, password: str, request: Request, extra: Optional[dict] = None):
+    """Primo passaggio dell'accesso di un amministratore (password): dal pannello o dalla schermata
+    d'accesso unica della dashboard (/api/auth/login, con extra = {"redirect": "/admin"})."""
+    ip, login = client_ip(request), normalize_email(login_in)
     pair = f"ip:{ip}|{login}"
     admin_too_many("ip:" + ip)
     admin_too_many(pair, limiter=admin_pw_throttle)
     admin_too_many("acct:" + login, limiter=admin_account_throttle)
-    aid, outcome = await asyncio.to_thread(auth.verify_admin, login, b.password)
+    aid, outcome = await asyncio.to_thread(auth.verify_admin, login, password)
     if outcome == "locked":
         admin_throttle.fail("ip:" + ip)
         left = await asyncio.to_thread(auth.admin_lock_left, aid) if aid else 0
@@ -3809,7 +3825,7 @@ async def admin_login(b: AdminLogin, request: Request):
     if fidato:
         log.info("Amministrazione: %s su dispositivo riconosciuto, codice non richiesto", login)
     log.info("Amministrazione: password corretta per %s da %s (fase: %s)", login, ip, adm["stage"])
-    resp = JSONResponse({"ok": True, **admin_state_body(adm)})
+    resp = JSONResponse({"ok": True, **admin_state_body(adm), **(extra or {})})
     set_admin_cookie(resp, request, raw)
     return resp
 
@@ -8802,7 +8818,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-093000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-110000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -9805,7 +9821,7 @@ h3{font-size:1.1rem;font-weight:600;margin:0 0 10px}
   <form class="login-card" id="login-form" autocomplete="on" novalidate>
     <div class="brand">__NETMON_LOGO__<span class="brandname" translate="no">NetMon <small>Home tool</small></span>
       <select id="lg-lang" class="pill lang-pick" aria-label="Lingua"><option value="it" translate="no">Italiano</option><option value="en" translate="no">English</option><option value="de" translate="no">Deutsch</option><option value="fr" translate="no">Français</option></select></div>
-    <h1 id="login-title">Stato rete</h1>
+    <h1 id="login-title">Accedi</h1>
     <p id="login-intro"></p>
 
     <div class="newtoken" id="newtoken" hidden>
@@ -14557,11 +14573,11 @@ function setLoginMode(mode) {
   // "login" = accesso; "register" = nuovo account; "first" = primo account in assoluto
   loginMode = mode;
   const reg = mode !== "login";
-  $("#login-title").textContent = mode === "first" ? "Primo accesso" : reg ? "Crea un account" : "Stato rete";
+  $("#login-title").textContent = mode === "first" ? "Primo accesso" : reg ? "Crea un account" : "Accedi";
   $("#login-intro").textContent = mode === "first"
     ? "Chiave del server: API_TOKEN del file .env. Le sonde già collegate diventeranno tue."
     : reg ? "Il codice di accesso te lo dà chi gestisce il server."
-    : "";
+    : "Utenti e amministratori: dopo l'accesso ognuno arriva alla sua pagina.";
   $("#f-token").hidden = !reg;
   $("#f-token label").textContent = mode === "register" ? "Codice di accesso" : "Chiave del server";
   $("#f-pass2").hidden = !reg;
@@ -14569,11 +14585,12 @@ function setLoginMode(mode) {
   $("#f-remember").hidden = reg;
   $("#lg-pass").autocomplete = reg ? "new-password" : "current-password";
   $("#login-go").textContent = reg ? "Crea l'account e accedi" : "Accedi";
-  $("#login-switch").hidden = mode === "first";
-  $("#login-switch").textContent = reg ? "Hai già un account? Accedi" : "Non hai un account? Registrati";
+  $("#login-switch").textContent = reg ? "Hai già un account? Accedi"
+    : setupNeeded ? "Primo accesso con la chiave del server" : "Non hai un account? Registrati";
 }
+let setupNeeded = false;                 // nessun utente ancora: «Registrati» diventa il primo accesso
 $("#login-switch").onclick = () => {
-  setLoginMode(loginMode === "login" ? "register" : "login");
+  setLoginMode(loginMode === "login" ? (setupNeeded ? "first" : "register") : "login");
   $("#login-msg").textContent = "";
   (loginMode === "login" ? $("#lg-email") : $("#lg-token")).focus();
 };
@@ -14625,6 +14642,9 @@ async function checkAuth(message) {
     useTimeZone(st.tz || "");
     fillTzSelect($("#acc-tz"), st.tz || "", st.server_tz || "");
     if (st.user) return enterApp(st.user);
+    setupNeeded = !!st.setup_needed;
+    // arrivo dal pannello senza accesso (o appena uscito): il suo messaggio
+    try { message = message || sessionStorage.getItem("netmon.loginmsg") || ""; sessionStorage.removeItem("netmon.loginmsg"); } catch {}
     if (pendingInvite) {
       showLogin("register", "Invito ricevuto: codice ed email sono già inseriti, scegli la password.", false);
       $("#lg-token").value = pendingInvite.code;
@@ -14675,6 +14695,8 @@ $("#login-form").onsubmit = async e => {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const res = await r.json().catch(() => ({}));
     if (r.status === 409) { showLogin("login", res.detail || "Account già esistente: accedi."); return; }
+    // accesso unico: le credenziali erano di un amministratore, si prosegue nel pannello
+    if (r.ok && res.redirect === "/admin") { msg.textContent = "Accesso all'amministrazione…"; location.href = "/admin"; return; }
     if (!r.ok) return bad(typeof res.detail === "string" ? res.detail : "Accesso non riuscito (HTTP " + r.status + ").");
     msg.textContent = "";
     if (res.lang && res.lang !== I18N.lang) { location.reload(); return; }
@@ -16298,11 +16320,12 @@ if (location.hash.startsWith("#accesso=")) {
   $("#al-login").value = new URLSearchParams(location.hash.slice(1)).get("accesso") || "";
   history.replaceState(null, "", location.pathname);
 }
+// Schermata d'accesso unica: il pannello non ne ha una sua, si accede da /dashboard (utenti e
+// amministratori); le credenziali di un amministratore riportano qui per i passaggi successivi.
 function showLogin(message) {
-  showCard("#al-form");
-  $("#al-pass").value = "";
-  say("#al-msg", message || "", !!message);
-  ($("#al-login").value ? $("#al-pass") : $("#al-login")).focus();
+  try { if (message) sessionStorage.setItem("netmon.loginmsg", message); } catch {}
+  const login = $("#al-login").value.trim();
+  location.replace("/dashboard" + (login ? "#accesso=" + encodeURIComponent(login) : ""));
 }
 
 function showPwChange(login, current = "") {

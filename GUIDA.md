@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-093000*
+*Versione di netmon: 1.1.20261029-110000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -238,11 +238,18 @@ Tutto sta sullo stesso dominio (es. `netmonhome.net`):
 | Indirizzo | Cosa c'è |
 |---|---|
 | `https://netmonhome.net/` (e `/en/`, `/de/`, `/fr/`) | sito di presentazione: la pagina pubblica del servizio; *Accedi* porta alla dashboard |
-| `https://netmonhome.net/dashboard` | dashboard degli utenti (pagina di stato): accesso, registrazione con il codice, sonde e avvisi |
-| `https://netmonhome.net/admin` | pannello di amministrazione |
+| `https://netmonhome.net/dashboard` | **schermata d'accesso unica** per utenti e amministratori, poi la dashboard degli utenti (pagina di stato): registrazione con il codice, sonde e avvisi |
+| `https://netmonhome.net/admin` | pannello di amministrazione: ci si arriva dalla schermata d'accesso con le credenziali da amministratore; aperto senza accesso, porta alla schermata d'accesso |
 | `https://netmonhome.net/privacy` | informativa sulla privacy |
 
 `/status`, l'indirizzo delle versioni precedenti, rimanda a `/dashboard` (anche i link già mandati per email).
+
+**Un solo accesso.** Utenti e amministratori entrano dallo stesso modulo (*Accedi*, su `/dashboard`). Con le
+credenziali di un utente si apre la sua dashboard; con quelle di un amministratore si va nel pannello `/admin`,
+che chiede il codice dell'app di autenticazione (o di cambiare la password provvisoria, al primo accesso). Se la
+stessa email è sia di un utente sia di un amministratore, decide la password: quella dell'utente apre la
+dashboard, quella dell'amministratore il pannello. Uscendo dal pannello si torna alla schermata d'accesso. Chi è
+già dentro la dashboard come utente, per entrare nel pannello esce prima (*Esci*) o usa una finestra anonima.
 Il sito è in `server/sito.py`, creato da `python3 tools/importa-sito.py netmon-sito-<versione>.zip` a partire
 dallo zip del sito: per cambiarlo si rifà l'importazione con la pagina nuova e si alza la versione.
 Caratteri e icone del sito sono quelli di netmon.

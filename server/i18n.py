@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-093000"
+__version__ = "1.1.20261029-110000"
 import json
 import re
 
@@ -4901,6 +4901,25 @@ del _it, _tr, _lang, _text
 
 for _it, _tr in {
     "Cambia l'ordine di riquadri e dispositivi": ("Change the order of panels and devices", "Reihenfolge von Kästen und Geräten ändern", "Changer l'ordre des cadres et des appareils"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+
+# Schermata d'accesso unica (utenti e amministratori) e messaggi che arrivano dal pannello
+for _it, _tr in {
+    "Utenti e amministratori: dopo l'accesso ognuno arriva alla sua pagina.":
+        ("Users and administrators: after signing in, each one lands on their own page.",
+         "Benutzer und Administratoren: nach der Anmeldung landet jeder auf seiner Seite.",
+         "Utilisateurs et administrateurs : après la connexion, chacun arrive sur sa page."),
+    "Primo accesso con la chiave del server": ("First sign-in with the server key", "Erste Anmeldung mit dem Serverschlüssel",
+                                               "Première connexion avec la clé du serveur"),
+    "Accesso all'amministrazione…": ("Opening the administration…", "Verwaltung wird geöffnet…", "Ouverture de l'administration…"),
+    "Sei uscito dall'amministrazione.": ("You have signed out of the administration.", "Du hast dich von der Verwaltung abgemeldet.",
+                                         "Tu t'es déconnecté de l'administration."),
+    "La sessione è scaduta: accedi di nuovo.": ("Your session has expired: sign in again.", "Die Sitzung ist abgelaufen: melde dich erneut an.",
+                                                "La session a expiré : reconnecte-toi."),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)

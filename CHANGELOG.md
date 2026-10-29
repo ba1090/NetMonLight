@@ -7,8 +7,15 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-093000 · 2 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-110000 · 3 versioni) — NetMon Light
 
+- **Una sola schermata d'accesso per utenti e amministratori**: il modulo *Accedi* di `/dashboard` riconosce
+  l'utenza. Le credenziali di un utente aprono la dashboard, quelle di un amministratore portano al pannello
+  `/admin`, che prosegue con il codice dell'app o con il cambio della password provvisoria. Tentativi e blocchi
+  restano quelli del pannello. `/admin` senza accesso, o dopo *Esci*, porta alla schermata d'accesso; con la
+  stessa email per utente e amministratore decide la password. Sul server senza utenti il primo accesso con la
+  chiave del server lascia il link *Hai già un account? Accedi* per gli amministratori. *Pagina utente,
+  pannello, server.*
 - **Backup completo del server e ripristino dal pannello** (*Server › Backup e ripristino*): un file cifrato con
   la password scelta da chi lo scarica (come i file di trasferimento) con utenti, amministratori, sonde, storico,
   codici di accesso e impostazioni del pannello; restano fuori `.env` e chiavi della VM. Il ripristino mostra
