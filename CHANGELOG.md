@@ -7,6 +7,18 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
+## 29 ottobre 2026 (1.1.20261029-083000 · 1 versione) — NetMon Light
+
+- **Disponibilità sul telefono** (da NetMon 1.1.20261028-232258): gli orari sotto le caselle non si accavallano più;
+  quelli che toccherebbero il precedente si nascondono («ora» resta) e si ricalcolano a ogni cambio di larghezza.
+  *Pagina utente.*
+- **Installazione su Oracle Cloud**: sulle immagini con il firewall di Oracle (`netfilter-persistent`,
+  `/etc/iptables/rules.v4`) l'installatore non installa più `ufw`, che disinstallava `netfilter-persistent` e
+  lasciava le regole di Oracle senza caricamento all'avvio: apre 80 e 443 prima del `REJECT` di `iptables` e le
+  salva. Ricorda le regole *Ingress* nella *Security List* della VCN. *Server, documenti.*
+- **Sonda**: la domanda sul dominio propone `netmonhome.net` come esempio (prima `vm1.netmonhome.net`, delle più
+  VM); `config.yaml.example` aggiornato (indirizzo e token della sonda). *Sonda.*
+
 ## 28 ottobre 2026 (1.1.20261028-190000 · 2 versioni) — NetMon Light
 
 - **Sito di presentazione sulla stessa VM**: la pagina pubblica di netmonhome.net (sito 1.0.20261024-231919) ora

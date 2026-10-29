@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# netmon versione 1.1.20261028-190000
+# netmon versione 1.1.20261029-083000
 """Reti Wi-Fi della sonda (NetworkManager), su richiesta del proprietario dalla pagina di stato.
 
 Installazione: sudo install -m 755 -o root -g root netprobe-wifi /usr/local/sbin/

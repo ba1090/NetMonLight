@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261028-190000*
+*Versione di netmon: 1.1.20261029-083000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -2242,6 +2242,7 @@ dal `.env` e rilancia lo stesso comando del passo 2.
 | *La VM non ha ancora la chiave di rilascio e il pacchetto non la contiene* | Firma lo zip con la versione aggiornata di *Firma NetMon* (in `tools/mac` del repository: lo zip non contiene gli strumenti): aggiunge la tua chiave pubblica al pacchetto e poi lo firma. Ricarica lo zip con il **nuovo** `.sig`. Oppure aggiorna a mano via SSH con `installa-server.sh --aggiorna`. |
 | Caddy non parte o `reload` fallisce | `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`. Errore tipico: manca lo spazio prima della `{` (vedi A4). |
 | Caddy: *Timeout during connect (likely firewall problem)* | Porte 80/443 chiuse nel pannello del provider (passo A1) o nel firewall della VM: `sudo ufw status`, poi `sudo ufw allow 80,443/tcp`. |
+| **Oracle Cloud**: HTTPS va ma `http://dominio` resta senza risposta, o niente risponde | Nella console, *Networking → Virtual Cloud Networks →* VCN *→ Security Lists* della subnet della VM: regole *Ingress* da `0.0.0.0/0` per TCP 80 e 443 (*Source Port* vuota; anche nel *Network Security Group*, se la VM ne ha uno). Sulle immagini Oracle l'installatore apre 80 e 443 nel loro firewall (`iptables`, `/etc/iptables/rules.v4`) senza installare `ufw`, che disinstallerebbe `netfilter-persistent`. Controllo: `sudo iptables -L INPUT -n --line-numbers` (80 e 443 prima del `REJECT`). |
 | Il sito va in timeout dal browser | Come sopra. Prova anche da rete mobile per escludere la rete dell'ufficio. |
 | Installazione della sonda: *Permessi di riavvio e aggiornamenti* fallisce con *cannot create regular file '/etc/sudoers.d/…'* | Sul sistema manca il pacchetto `sudo` (installazioni minime, container) e lo script è di una versione precedente: con quello nuovo l'installazione si completa lo stesso e dice cosa non funziona (vedi *Senza `sudo`* in C2). Per avere anche le operazioni da remoto: `apt-get install -y sudo` e rilancia l'installazione. |
 | *Stato sonda*: *Aggiornamenti dal server: non disponibili* | Sulla sonda manca `sudo`: `apt-get install -y sudo`, poi `installa-sonda.sh --aggiorna`. Fino ad allora la sonda si aggiorna solo a mano. |

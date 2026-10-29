@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261028-190000"
+__version__ = "1.1.20261029-083000"
 VERSION = __version__
 import asyncio
 import base64
@@ -8515,7 +8515,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261028-190000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-083000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -12335,6 +12335,24 @@ function availFetch(key, url) {
     .catch(e => { avail = { key, data: null, at: Date.now(), busy: false, err: e.message || String(e) }; })
     .finally(() => { if (!dashOrdering) renderDash(); });
 }
+// Etichette sotto le caselle della Disponibilità: su uno schermo stretto quelle vicine si
+// accavallerebbero (00:00 sopra 06:00). Si nasconde quella che tocca la precedente; «ora» resta sempre.
+function avAxisFit(axis) {
+  const spans = [...axis.querySelectorAll("span")];
+  spans.forEach(sp => { sp.style.visibility = ""; });
+  const end = spans.find(sp => sp.classList.contains("end"));
+  let last = null;
+  for (const sp of spans) {
+    if (sp === end) continue;
+    const r = sp.getBoundingClientRect();
+    if (!r.width) continue;
+    const endR = end && end.getBoundingClientRect();
+    if ((last && r.left < last.right + 6) || (endR && endR.width && r.right > endR.left - 6)) { sp.style.visibility = "hidden"; continue; }
+    last = r;
+  }
+}
+const avAxisRO = new ResizeObserver(entries => entries.forEach(e => avAxisFit(e.target)));
+
 function availCard(prefs, size) {
   const card = el("section", "bigcard av-card");
   const range = prefs.avail_range === "7d" ? "7d" : "24h";
@@ -12431,6 +12449,7 @@ function availCard(prefs, size) {
   }
   const ora = el("span", "end", "ora"); axis.append(ora);
   rows.append(el("div"), axis);
+  avAxisRO.observe(axis);                   // si sistema quando è disegnato e a ogni cambio di larghezza
   if (!small) rows.append(el("div"));
   card.append(rows);
   if (small) return card;

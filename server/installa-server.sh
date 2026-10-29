@@ -10,7 +10,7 @@
 # Verifica il sistema, installa i pacchetti, chiede le informazioni necessarie (dominio,
 # notifiche), prova email/Telegram/ntfy, configura HTTPS e alla fine mostra le informazioni
 # da conservare. Si può rilanciare quando si vuole: configurazione, account e storico restano.
-NETMON_VERSION="1.1.20261028-190000"
+NETMON_VERSION="1.1.20261029-083000"
 
 set -uo pipefail
 
@@ -389,6 +389,23 @@ public_url_env() {
   ok "Indirizzo pubblico per i link nelle email: https://$dom"
 }
 
+# Firewall di Oracle Cloud: 80 e 443 accettate prima del REJECT finale della catena INPUT, subito e
+# all'avvio (netfilter-persistent salva le regole in /etc/iptables/rules.v4).
+oracle_fw() {
+  local p pos
+  for p in 80 443; do
+    iptables -C INPUT -p tcp -m state --state NEW -m tcp --dport "$p" -j ACCEPT 2>/dev/null && continue
+    pos=$(iptables -L INPUT -n --line-numbers | awk '$2 == "REJECT" {print $1; exit}')
+    if [ -n "$pos" ]; then
+      iptables -I INPUT "$pos" -p tcp -m state --state NEW -m tcp --dport "$p" -j ACCEPT || return 1
+    else
+      iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport "$p" -j ACCEPT || return 1
+    fi
+  done
+  cp -p /etc/iptables/rules.v4 "/etc/iptables/rules.v4.bak-$(date +%Y%m%d-%H%M%S)"
+  netfilter-persistent save
+}
+
 wait_local_health() {
   local i
   for i in $(seq 1 30); do
@@ -422,7 +439,16 @@ fi
 step "Installazione dei pacchetti"
 export DEBIAN_FRONTEND=noninteractive
 run "Aggiornamento elenco pacchetti" apt-get update
-run "Python, Caddy, firewall e strumenti" apt-get install -y python3 python3-venv caddy ufw curl ca-certificates openssl
+# Immagini di Oracle Cloud: il firewall è iptables con le regole in /etc/iptables/rules.v4, caricate da
+# netfilter-persistent. ufw è in conflitto con quel pacchetto (installarlo lo disinstalla, e le regole di
+# Oracle non si caricano più all'avvio): lì si aprono 80 e 443 nel firewall di Oracle, senza ufw.
+ORACLE_FW=0
+if dpkg-query -W -f '${Status}' netfilter-persistent 2>/dev/null | grep -q "install ok installed" \
+   && [ -f /etc/iptables/rules.v4 ]; then
+  ORACLE_FW=1
+fi
+FW_PKG=ufw; [ "$ORACLE_FW" = 1 ] && FW_PKG=
+run "Python, Caddy, firewall e strumenti" apt-get install -y python3 python3-venv caddy $FW_PKG curl ca-certificates openssl
 python3 - <<'EOF' >> "$LOG" 2>&1 || die "Serve Python 3.9 o successivo."
 import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)
 EOF
@@ -563,7 +589,10 @@ info "Chat ID Telegram e topic ntfy sono personali: ognuno li indica in ⚙ Impo
 # --- firewall
 echo
 UFW_ON=0
-if ufw status 2>/dev/null | grep -q "Status: active"; then
+if [ "$ORACLE_FW" = 1 ]; then
+  info "Firewall di Oracle Cloud (iptables, /etc/iptables/rules.v4): apro lì le porte 80 e 443, senza ufw."
+  info "Servono anche le regole Ingress TCP 80 e 443 da 0.0.0.0/0 nella Security List della VCN (console di Oracle)."
+elif ufw status 2>/dev/null | grep -q "Status: active"; then
   UFW_ON=1; info "Firewall ufw già attivo: aggiungo le porte 80 e 443."
 elif yes_no "Attivare il firewall della VM (ufw) lasciando aperti SSH, 80 e 443" s; then
   UFW_ON=1
@@ -610,6 +639,7 @@ if [ "$UFW_ON" = 1 ]; then
   run "Firewall: 80 e 443" ufw allow 80,443/tcp
   run "Firewall attivo" ufw --force enable
 fi
+[ "$ORACLE_FW" = 1 ] && run "Firewall di Oracle: porte 80 e 443" oracle_fw
 
 # ------------------------------------------------------------------ 5. avvio e HTTPS
 step "Avvio e HTTPS"

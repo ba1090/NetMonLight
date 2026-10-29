@@ -9,7 +9,7 @@
 # Verifica il sistema, installa i pacchetti, chiede server, token, dispositivi e FRITZ!Box
 # (provandoli subito), avvia i servizi, controlla il primo invio al server e alla fine
 # mostra le informazioni da conservare.
-NETMON_VERSION="1.1.20261028-190000"
+NETMON_VERSION="1.1.20261029-083000"
 
 set -uo pipefail
 
@@ -364,7 +364,7 @@ step "Informazioni necessarie"
 OLD_URL=$(cfgget server_url); OLD_HOST=${OLD_URL%/api/report}; OLD_HOST=${OLD_HOST#https://}
 [[ "$OLD_HOST" == *tuodominio* ]] && OLD_HOST=
 while :; do
-  ask "Dominio del server (es. vm1.netmonhome.net)" "$OLD_HOST"
+  ask "Dominio del server (es. netmonhome.net)" "$OLD_HOST"
   SCHEME=https; [[ "$REPLY" == http://* ]] && SCHEME=http     # http:// solo se scritto esplicitamente
   HOST=${REPLY#http://}; HOST=${HOST#https://}; HOST=${HOST%%/*}
   [ -n "$HOST" ] || continue
