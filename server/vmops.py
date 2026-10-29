@@ -5,7 +5,7 @@ Tutto viene letto da /proc e /sys, senza librerie esterne e senza privilegi. Le 
 /etc/sudoers.d/netmon-vm e da nient'altro; l'aggiornamento gira in un'unità systemd separata,
 così non si interrompe se durante apt il servizio netmon-server viene riavviato.
 """
-__version__ = "1.1.20261029-150000"
+__version__ = "1.1.20261029-160000"
 import json
 import os
 import platform

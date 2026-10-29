@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-150000*
+*Versione di netmon: 1.1.20261029-160000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -1843,7 +1843,8 @@ finestra *Dispositivi* non lasciano andare oltre) e la riceve di nuovo da sola q
 server, comunque, non tiene i FRITZ!Box e i dispositivi oltre il limite anche se una sonda li manda.
 
 Con *Basso*, *Medio* e *Alto* i tre campi sono bloccati sui valori del piano. **I nuovi account nascono con
-il piano Basso** (si cambia con `NEW_USER_PLAN` nel `.env`: `medio`, `alto`, oppure vuoto per nessun piano);
+il piano Alto** (4 sonde, 4 FRITZ!Box, 45 dispositivi; si cambia con `NEW_USER_PLAN` nel `.env`: `basso`,
+`medio`, oppure vuoto per nessun piano);
 gli account che c'erano già restano come sono. Abbassando il numero di sonde, quelle già collegate oltre il
 limite continuano a funzionare: semplicemente non se ne possono aggiungere altre. Il piano ha la sua colonna
 (*Piano*) nella tabella *Utenti*, come la *Scadenza*. Gli account con

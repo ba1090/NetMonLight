@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-150000"
+__version__ = "1.1.20261029-160000"
 import json
 import re
 
@@ -4960,6 +4960,16 @@ for _it, _tr in {
     "Chiave del server o codice di accesso non validi.": ("Invalid server key or access code.",
                                                            "Ungültiger Serverschlüssel oder Zugangscode.",
                                                            "Clé du serveur ou code d'accès non valide."),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+# Indirizzo completo della sonda (procedura guidata e mail d'invito)
+for _it, _tr in {
+    'Indirizzo completo della sonda': ('Full probe address', 'Vollständige Adresse der Sonde', 'Adresse complète de la sonde'),
+    "L'installazione lo compone da sola dal dominio. Scrivilo così com'è dove serve l'indirizzo intero: pagina locale della sonda (sezione Server), config.yaml o Home Assistant.": ("The installer builds it from the domain on its own. Enter it as is wherever the full address is needed: the probe's local page (Server section), config.yaml or Home Assistant.", 'Die Installation setzt sie selbst aus der Domain zusammen. Gib sie unverändert dort ein, wo die vollständige Adresse gebraucht wird: lokale Seite der Sonde (Abschnitt Server), config.yaml oder Home Assistant.', "L'installation la compose toute seule à partir du domaine. Saisis-la telle quelle là où l'adresse complète est demandée : page locale de la sonde (section Serveur), config.yaml ou Home Assistant."),
+    "Dove serve l'indirizzo intero (pagina locale della sonda, config.yaml, Home Assistant) scrivi:": ("Where the full address is needed (the probe's local page, config.yaml, Home Assistant) enter:", 'Wo die vollständige Adresse gebraucht wird (lokale Seite der Sonde, config.yaml, Home Assistant), gib ein:', "Là où l'adresse complète est demandée (page locale de la sonde, config.yaml, Home Assistant), saisis :"),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)

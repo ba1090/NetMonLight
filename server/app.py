@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-150000"
+__version__ = "1.1.20261029-160000"
 VERSION = __version__
 import asyncio
 import base64
@@ -225,7 +225,7 @@ DEVICES_PER_PROBE = 30           # dispositivi controllati da ogni sonda, se l'a
 # FRITZ!Box di ogni sonda compreso). Piani scelti dal pannello: basso = 1 sonda, 1 FRITZ!Box e 5
 # dispositivi; medio = 2, 2 e 15; alto = 4, 4 e 45. «personalizzato» usa i numeri scelti a mano;
 # nessun piano = MAX_PROBES_PER_USER sonde, FRITZ_TOTAL_DEFAULT FRITZ!Box e DEVICES_TOTAL_DEFAULT
-# dispositivi. I nuovi account nascono con il piano basso (NEW_USER_PLAN, in auth.py).
+# dispositivi. I nuovi account nascono con il piano alto (NEW_USER_PLAN, in auth.py).
 PLANS = {"basso": (1, 1, 5), "medio": (2, 2, 15), "alto": (4, 4, 45)}
 FRITZ_TOTAL_DEFAULT = 50
 DEVICES_TOTAL_DEFAULT = 500
@@ -4234,6 +4234,8 @@ async def send_invite_mail(request: Request, adm: dict, email: str, code: str, d
         "    unzip -q netmon-sonda-*.zip && sudo bash netmon/probe/installa-sonda.sh\n\n"
         "Lo script ti chiede il dominio del server e il token. Il dominio da configurare sulla sonda è:\n\n"
         f"    {dominio}\n\n"
+        "Dove serve l'indirizzo intero (pagina locale della sonda, config.yaml, Home Assistant) scrivi:\n\n"
+        f"    {public_base(request)}/api/report\n\n"
         "Il token lo trovi in Impostazioni › Sonde dopo aver creato la sonda.\n\n"
         f"{home_assistant}"
         "Se non ti aspettavi questo messaggio puoi ignorarlo.",
@@ -9083,7 +9085,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-150000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-160000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -10269,6 +10271,10 @@ h3{font-size:1.1rem;font-weight:600;margin:0 0 10px}
           <div class="tokenrow"><code id="wiz-host" translate="no"></code><button type="button" id="wiz-host-copy">Copia</button></div>
           <p class="tokenlabel">Token</p>
           <div class="tokenrow"><code id="wiz-token" translate="no"></code><button type="button" id="wiz-token-copy">Copia</button></div>
+          <p class="tokenlabel">Indirizzo completo della sonda</p>
+          <div class="tokenrow"><code id="wiz-url" translate="no"></code><button type="button" id="wiz-url-copy">Copia</button></div>
+          <p class="hint">L'installazione lo compone da sola dal dominio. Scrivilo così com'è dove serve l'indirizzo intero:
+            pagina locale della sonda (sezione Server), config.yaml o Home Assistant.</p>
           <p class="hint">Il token è la chiave di questa sonda: copialo ora, per sicurezza dopo non viene più mostrato (se lo perdi
             ne generi uno nuovo in Impostazioni → Sonde). Poi l'installazione chiede il nome, i dispositivi da controllare
             (propone già il router) e, se ce l'hai, il FRITZ!Box: segui le domande. Alla fine prova l'invio al server.</p>
@@ -12275,6 +12281,7 @@ function wizSave() { try { sessionStorage.setItem(WIZ_KEY, JSON.stringify(wz)); 
 function wizMsg(t, bad) { const m = $("#wiz-msg"); m.className = "hint" + (bad ? " warn" : ""); m.textContent = t || ""; }
 // dominio da scrivere nell'installazione: quello del server delle sonde (https:// sottinteso)
 const wizHost = url => (url || location.origin + "/api/report").replace(/^https:\/\//, "").replace(/\/api\/report$/, "");
+const wizUrl = url => url || location.origin + "/api/report";
 function wizStep(n) {
   wz.step = n; wizSave();
   $("#wiz").querySelectorAll(".wiz-step").forEach(x => { x.hidden = Number(x.dataset.step) !== n; });
@@ -12282,6 +12289,7 @@ function wizStep(n) {
     const k = Number(li.dataset.n); li.className = k === n ? "on" : k < n ? "done" : "";
   });
   $("#wiz-host").textContent = wz.host || ""; $("#wiz-token").textContent = wz.token || "";
+  $("#wiz-url").textContent = wz.url || wizUrl("");
   $("#wiz-wait-name").textContent = $("#wiz-done-name").textContent = wz.name || "";
   $("#wiz-wait").hidden = !!wz.connected; $("#wiz-done").hidden = !wz.connected;
   wizMsg("");
@@ -12311,7 +12319,7 @@ async function wizResume() {
       + "Puoi continuare con questa: riceve un token nuovo (quello di prima smette di funzionare).";
     $("#wiz-resume-btn").onclick = () => wizBusy($("#wiz-resume-btn"), async () => {
       const r = await postJSON("/api/probes/token", { probe: p.key });
-      wz = { key: p.key, name: p.label, token: r.token, host: wizHost(r.server_url) };
+      wz = { key: p.key, name: p.label, token: r.token, host: wizHost(r.server_url), url: wizUrl(r.server_url) };
       wizStep(2);
     });
     $("#wiz-resume").hidden = false;
@@ -12334,7 +12342,7 @@ $("#wiz-create").onclick = () => wizBusy($("#wiz-create"), async () => {
   const name = $("#wiz-name").value.trim();
   if (!name) throw new Error("Scegli un nome per la sonda.");
   const r = await postJSON("/api/probes/new", { name });
-  wz = { key: r.key, name, token: r.token, host: wizHost(r.server_url) };
+  wz = { key: r.key, name, token: r.token, host: wizHost(r.server_url), url: wizUrl(r.server_url) };
   wizStep(2);
 });
 $("#wiz-claim-btn").onclick = () => wizBusy($("#wiz-claim-btn"), async () => {
@@ -12349,7 +12357,7 @@ $("#wiz-claim-btn").onclick = () => wizBusy($("#wiz-claim-btn"), async () => {
 $("#wiz").querySelectorAll(".wiz-next").forEach(b => { b.onclick = () => wizStep(Math.min(4, (wz.step || 1) + 1)); });
 $("#wiz").querySelectorAll(".wiz-back").forEach(b => { b.onclick = () => wizStep(Math.max(1, (wz.step || 1) - 1)); });
 $("#wiz-finish").onclick = () => { wz = { closed: true }; wizSave(); wizUpdate(data); refresh(); };
-[["#wiz-scp", "#wiz-scp-copy"], ["#wiz-cmd", "#wiz-cmd-copy"], ["#wiz-host", "#wiz-host-copy"], ["#wiz-token", "#wiz-token-copy"]]
+[["#wiz-scp", "#wiz-scp-copy"], ["#wiz-cmd", "#wiz-cmd-copy"], ["#wiz-host", "#wiz-host-copy"], ["#wiz-token", "#wiz-token-copy"], ["#wiz-url", "#wiz-url-copy"]]
   .forEach(([c, b]) => { $(b).onclick = () => copyText($(c), $(b)); });
 
 // ---- grafici dei riquadri grandi (Uso della linea, SpeedTest) e dello storico SpeedTest ----
@@ -16490,7 +16498,7 @@ tr.is-blocked td{color:var(--muted)}
       </div>
       <p class="hint">I limiti valgono per tutto l'account, cioè per tutte le sue sonde insieme (FRITZ!Box
         contati tutti, il primo di ogni sonda compreso). Con un piano li decide il piano; con «Personalizzato»
-        li scegli qui. I nuovi account nascono con il piano Basso. Vuoto = predefinito. Le sonde si servono in
+        li scegli qui. I nuovi account nascono con il piano Alto. Vuoto = predefinito. Le sonde si servono in
         ordine di creazione: se l'account va oltre un limite, FRITZ!Box e dispositivi in più delle sonde più
         recenti smettono di essere controllati (restano salvati, e tornano se il limite si alza). Le sonde
         ricevono la nuova regola al controllo successivo.</p>

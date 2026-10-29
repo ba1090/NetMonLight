@@ -7,8 +7,14 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-150000 · 6 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-160000 · 7 versioni) — NetMon Light
 
+- **Indirizzo completo della sonda** nella procedura *Collega la tua prima sonda* (passo *Installa*, con
+  *Copia*) e nella mail d'invito, oltre al dominio: `https://dominio/api/report`, da scrivere così com'è nella
+  pagina locale della sonda, in `config.yaml` o in Home Assistant. *Pagina utente, email.*
+- **I nuovi account nascono con il piano Alto** (4 sonde, 4 FRITZ!Box, 45 dispositivi) invece di Basso.
+  Vale per le installazioni nuove; su una VM già installata il piano dei nuovi account resta quello scritto nel
+  `.env` (`NEW_USER_PLAN`). Gli account esistenti non cambiano: si cambiano da *Utenti › Limiti*. *Server.*
 - **Primo account con un codice di accesso**: sul server ancora senza utenti la registrazione accettava solo la
   chiave del server, e un codice creato dal pannello dava *Chiave del server non valida*. Ora vale anche il
   codice di accesso. *Server.*

@@ -6,7 +6,7 @@ Il database (auth.db) non contiene nulla di riutilizzabile se venisse copiato:
   soltanto nel cookie del browser.
 Il file viene creato con permessi 600 (leggibile solo dall'utente del servizio).
 """
-__version__ = "1.1.20261029-150000"
+__version__ = "1.1.20261029-160000"
 import ipaddress
 import base64
 import hashlib
@@ -39,9 +39,9 @@ ADMIN_SESSION_HOURS = 8           # pagina di amministrazione: sessione breve, s
 ADMIN_TRUST_DAYS = 15
 
 # Piano con cui nasce ogni nuovo account: basso, medio, alto, oppure vuoto (nessun piano = limiti predefiniti)
-NEW_USER_PLAN = os.environ.get("NEW_USER_PLAN", "basso").strip().lower() or None
+NEW_USER_PLAN = os.environ.get("NEW_USER_PLAN", "alto").strip().lower() or None
 if NEW_USER_PLAN not in (None, "basso", "medio", "alto"):
-    NEW_USER_PLAN = "basso"
+    NEW_USER_PLAN = "alto"
 
 
 def new_secret(nbytes: int) -> str:
@@ -421,7 +421,7 @@ class AuthDB:
                 verified = bool(row[4])
             first = c.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
             now = time.time()
-            # piano dei nuovi account (NEW_USER_PLAN nel .env, predefinito «basso»); l'amministratore
+            # piano dei nuovi account (NEW_USER_PLAN nel .env, predefinito «alto»); l'amministratore
             # lo cambia dal pannello (Limiti). Gli account già esistenti restano come sono.
             cur = c.execute("INSERT INTO users (email, pw_hash, created, pw_changed, is_admin, email_verified, lang, plan) "
                             "VALUES (?,?,?,?,?,?,?,?)",
