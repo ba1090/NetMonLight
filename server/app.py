@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-180000"
+__version__ = "1.1.20261029-190000"
 VERSION = __version__
 import asyncio
 import base64
@@ -7560,14 +7560,77 @@ async def heavy(user, fn):
             _heavy_users.pop(uid, None)
 
 
+OUTAGE_LOOKBACK = 30 * 86400          # un disservizio iniziato prima del periodo mostrato si cerca fin qui
+
+
+def like_escape(text):
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def device_outages(conn, probe, device, since, until):
+    """Disservizi notificati di un dispositivo nel periodo: [{start, alert, end, ongoing}].
+
+    Si ricostruiscono dagli avvisi registrati negli eventi: «[ALERT] <nome> non risponde» apre, «[OK]
+    <nome> di nuovo raggiungibile» chiude; l'avviso di tutta la rete («Nessun dispositivo risponde»)
+    vale anche per questo dispositivo, fino al ritorno della rete (o al suo, se resta tra quelli
+    «Ancora non raggiungibili»). L'inizio è il primo controllo fallito della serie che ha fatto partire
+    l'avviso. Niente avviso (priorità Mai, sonda in pausa, soglia non raggiunta) = niente disservizio."""
+    name = like_escape(device)
+    rows = conn.execute(
+        "SELECT ts, title, body FROM events WHERE probe = ? AND ts >= ? AND ts <= ? AND ("
+        "title LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR title LIKE '[CRITICO] Nessun dispositivo risponde (%' "
+        "OR title LIKE '[OK] La rete di %') ORDER BY ts",
+        (probe, since - OUTAGE_LOOKBACK, until, f"[ALERT] {name} non risponde (%",
+         f"[OK] {name} di nuovo raggiungibile (%")).fetchall()
+    out, cur = [], None
+    for ts, title, body in rows:
+        if title.startswith("[ALERT] ") or title.startswith("[CRITICO] "):
+            if cur is None:
+                cur = {"alert": ts}
+        elif cur is not None:
+            if title.startswith("[OK] La rete di "):
+                m = re.search(r"Ancora non raggiungibili: (.*)\.\s*$", body or "")
+                if m and device in m.group(1).split(", "):
+                    continue                     # la rete è tornata, questo dispositivo no
+            cur["end"] = ts
+            out.append(cur)
+            cur = None
+    if cur is not None:
+        cur["end"], cur["ongoing"] = until, True
+        out.append(cur)
+    res = []
+    for o in out:
+        if o["end"] < since or o["alert"] > until:
+            continue
+        # inizio: il primo controllo fallito dopo l'ultimo riuscito prima dell'avviso
+        ok = conn.execute("SELECT MAX(ts) FROM samples WHERE probe = ? AND device = ? AND ok = 1 AND ts < ? AND ts > ?",
+                          (probe, device, o["alert"], o["alert"] - 86400)).fetchone()[0]
+        first = conn.execute("SELECT MIN(ts) FROM samples WHERE probe = ? AND device = ? AND ok = 0 AND ts > ? AND ts <= ?",
+                             (probe, device, ok if ok is not None else o["alert"] - 3600, o["alert"])).fetchone()[0]
+        res.append({"start": first if first is not None else o["alert"], "alert": o["alert"], "end": o["end"],
+                    "ongoing": bool(o.get("ongoing"))})
+    return res
+
+
+def device_alarm(probe, device):
+    """Quando un dispositivo fa partire l'avviso: controlli falliti di fila, priorità, sonda in pausa."""
+    p = monitor.state.get(probe) or {}
+    d = (p.get("devices") or {}).get(device)
+    return {"threshold": monitor.fails_needed(p, d), "prio": monitor.priority_of(d),
+            "paused": probe in registry.paused_keys()}
+
+
 @app.get("/api/history")
 async def api_history(probe: str, device: str, range: str = "6h", start: Optional[float] = None,
                       end: Optional[float] = None, user: dict = Depends(ui_user)):
-    """Storico dei ping di un dispositivo, raggruppato in punti di ampiezza fissa."""
+    """Storico dei ping di un dispositivo, raggruppato in punti di ampiezza fissa, con i disservizi
+    notificati del periodo (per distinguerli dai ping persi senza avviso)."""
     owns(user, probe)
     since, until, bucket = time_window(range, start, end, RANGES, 60)
+    alarm = device_alarm(probe, device)
     def leggi():
         with db() as conn:
+            outages = device_outages(conn, probe, device, since, until)
             points = conn.execute(
                 "SELECT CAST(ts / ? AS INTEGER) * ? AS b, AVG(rtt), MIN(rtt), MAX(rtt), "
                 "       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END), COUNT(*) "
@@ -7584,6 +7647,7 @@ async def api_history(probe: str, device: str, range: str = "6h", start: Optiona
                        for b, avg, mn, mx, lost, n in points],
             "stats": {"min": stats[0], "avg": stats[1], "max": stats[2],
                       "lost": stats[3] or 0, "samples": stats[4] or 0},
+            "outages": outages, "alarm": alarm,
         }
 
     return await heavy(user, leggi)
@@ -9165,7 +9229,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-180000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-190000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -9691,6 +9755,12 @@ body.dashorder .dash-summary,body.dashorder .dash-line{display:none}
 .readout span b{font-family:var(--mono);font-weight:500}
 .readout span b.low{color:var(--bad);font-weight:600}
 .chart .loss{fill:var(--bad);opacity:.55}
+.chart .outage{fill:var(--bad);opacity:.3}
+.chart .loss-tick{fill:var(--warn);opacity:.85}
+.readout .note{flex-basis:100%;margin-top:4px;font-weight:500;color:var(--muted)}
+.readout .note.bad{color:var(--bad)}
+.stat small{display:block;color:var(--muted);font-size:.78rem;margin-top:2px}
+.stat b.bad{color:var(--bad)}
 .chart text{fill:var(--muted);font-size:11px;font-family:var(--mono)}
 .chart-note{color:var(--muted);font-size:.85rem;margin:8px 0 0}
 .drow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) auto auto;gap:8px;margin-bottom:8px;align-items:center}
@@ -14176,6 +14246,14 @@ function sysSpec(metric, label) {
 }
 
 function fmtMs(v) { return v == null ? "—" : (v >= 100 ? Math.round(v) : v.toFixed(1)) + " ms"; }
+function fmtMin(sec) { const m = Math.max(1, Math.round(sec / 60)); return m < 120 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; }
+// ora di un istante; con un periodo più lungo di un giorno anche la data
+function fmtWhen(ts, h) {
+  const d = new Date(ts * 1000), hm = d.toLocaleTimeString(I18N.locale, { hour: "2-digit", minute: "2-digit" });
+  return h && h.now - h.since > 86400 ? d.toLocaleDateString(I18N.locale, { day: "2-digit", month: "2-digit" }) + " " + hm : hm;
+}
+// disservizio notificato che tocca il punto (il punto copre [t, t + bucket))
+function outageAt(h, p) { return (h.outages || []).find(o => p.t + h.bucket > o.start && p.t < o.end) || null; }
 function fmtBytes(b) {
   if (!b) return "—";
   if (b >= 1e9) return (b / 1e9).toFixed(b >= 1e11 ? 0 : 1) + " GB";
@@ -14198,14 +14276,23 @@ function fmtSpan(t, bucket) {
 const SPEC = {
   ping: {
     endpoint: "/api/history",
-    stats: h => [["Minimo", fmtMs(h.stats.min)], ["Media", fmtMs(h.stats.avg)], ["Massimo", fmtMs(h.stats.max)],
-                 ["Persi", h.stats.samples ? (100 * h.stats.lost / h.stats.samples).toFixed(1).replace(".0", "") + "%" : "—"]],
+    stats: h => {
+      const out = h.outages || [], tot = out.reduce((a, o) => a + o.end - o.start, 0), last = out[out.length - 1];
+      const iso = h.points.filter(p => p.lost && !outageAt(h, p)).reduce((a, p) => a + p.lost, 0);
+      return [["Minimo", fmtMs(h.stats.min)], ["Media", fmtMs(h.stats.avg)], ["Massimo", fmtMs(h.stats.max)],
+        ["Disservizi", String(out.length), out.length ? `${fmtMin(tot)} in tutto` : "nessuno nel periodo", out.length ? "bad" : ""],
+        ["Ping persi", h.stats.samples ? (100 * h.stats.lost / h.stats.samples).toFixed(1).replace(".0", "") + "%" : "—",
+         iso ? `${iso} senza avviso` : ""],
+        ["Ultimo disservizio", last ? fmtWhen(last.start, h) : "—",
+         !last ? "" : last.ongoing ? "in corso" : `durata ${fmtMin(last.end - last.start)}`]];
+    },
     layers: [
       { id: "avg", label: "Media", type: "line", key: "avg", cls: "line", color: "var(--accent)" },
       { id: "band", label: "Minimo–massimo", type: "band", lo: "min", hi: "max", box: true,
         color: "color-mix(in srgb, var(--accent) 30%, transparent)" },
-      { id: "loss", label: "Pacchetti persi", type: "loss", key: "lost", box: true,
-        color: "color-mix(in srgb, var(--bad) 55%, transparent)" },
+      { id: "outage", label: "Disservizio (notificato)", type: "outage", box: true,
+        color: "color-mix(in srgb, var(--bad) 45%, transparent)" },
+      { id: "loss", label: "Ping persi senza avviso", type: "loss", key: "lost", box: true, color: "var(--warn)" },
       { id: "period", label: "Media del periodo", type: "hline", stat: "avg", cls: "hline",
         color: "var(--accent)", fmt: fmtMs, off: true },
     ],
@@ -14215,6 +14302,20 @@ const SPEC = {
       ? [["Esito", `nessuna risposta in ${p.n} ${p.n === 1 ? "controllo" : "controlli"}`]]
       : [["Media", fmtMs(p.avg)], ["Minimo", fmtMs(p.min)], ["Massimo", fmtMs(p.max)],
          ["Persi", `${p.lost} su ${p.n}`]],
+    // cosa è successo in quel punto: disservizio notificato o ping persi senza avviso (e perché)
+    note: (p, h) => {
+      const o = outageAt(h, p);
+      if (o) return [o.ongoing
+        ? `Disservizio in corso: notifica inviata alle ${fmtWhen(o.alert, h)}, ancora senza risposta.`
+        : `Disservizio: notifica inviata alle ${fmtWhen(o.alert, h)}, di nuovo raggiungibile alle ${fmtWhen(o.end, h)} (${fmtMin(o.end - o.start)} senza risposta).`, true];
+      if (!p.lost) return null;
+      const a = h.alarm || {}, persi = p.lost === 1 ? "1 controllo fallito" : `${p.lost} controlli falliti`;
+      if (a.paused) return [`${persi} su ${p.n}: sonda in pausa, nessuna notifica.`, false];
+      if (a.prio === "mai") return [`${persi} su ${p.n}: dispositivo con priorità Mai, nessuna notifica.`, false];
+      const soglia = a.threshold || 3;
+      return [soglia === 1 ? `${persi} su ${p.n}, nessuna notifica.`
+        : `${persi} su ${p.n}: meno di ${soglia} di fila, la soglia dell'allarme, quindi nessuna notifica.`, false];
+    },
   },
   temp: {
     endpoint: "/api/sysmetrics",
@@ -14555,8 +14656,10 @@ async function loadHistory() {
     } else {
       const stats = $("#hist-stats"); stats.innerHTML = "";
       stats.classList.toggle("six", spec.stats(h).length === 6);
-      spec.stats(h).forEach(([label, value]) => {
-        const c = el("div", "stat"); c.append(el("span", "", label), el("b", "", value)); stats.appendChild(c);
+      spec.stats(h).forEach(([label, value, sub, cls]) => {
+        const c = el("div", "stat"); c.append(el("span", "", label), el("b", cls || "", value));
+        if (sub) c.appendChild(el("small", "", sub));
+        stats.appendChild(c);
       });
     }
     drawChart(); showReadout();
@@ -14689,12 +14792,23 @@ function drawChart() {
   });
 
   // Ordine di disegno: fasce e aree sotto, linee sopra, medie del periodo in cima
-  const order = { loss: 0, band: 1, line: 2, hline: 3 };
+  const order = { outage: 0, loss: 0, band: 1, line: 2, hline: 3 };
   visible.filter(l => l.type !== "stack").sort((a, b) => order[a.type] - order[b.type]).forEach(l => {
-    if (l.type === "loss") {
+    if (l.type === "outage") {
+      // disservizio notificato: dal primo controllo fallito al ritorno, a tutta altezza
+      (h.outages || []).forEach(o => {
+        const a = Math.max(L, x(o.start)), b = Math.min(W - R, x(o.end));
+        add("rect", { class: "outage", x: a, y: T, width: Math.max(3, b - a), height: H - T - B });
+      });
+    } else if (l.type === "loss") {
+      // ping persi senza avviso: una tacca sull'asse, alta quanto la parte di controlli persi del punto
+      // (con le specifiche vecchie, senza disservizi, resta la colonna intera)
+      const w = Math.max(2, (W - L - R) * h.bucket / Math.max(1, h.now - h.since));
       h.points.filter(p => p[l.key]).forEach(p => {
-        const w = Math.max(2, (W - L - R) * h.bucket / Math.max(1, h.now - h.since));
-        add("rect", { class: "loss", x: x(p.t), y: T, width: w, height: H - T - B });
+        if (!h.outages) { add("rect", { class: "loss", x: x(p.t), y: T, width: w, height: H - T - B }); return; }
+        if (outageAt(h, p)) return;
+        const hh = 8 + 34 * p[l.key] / Math.max(1, p.n);
+        add("rect", { class: "loss-tick", x: x(p.t), y: H - B - hh, width: Math.max(3, w), height: hh, rx: 1.5 });
       });
     } else if (l.type === "band") {
       segments(h.points, l.lo, h.bucket).filter(sg => sg.length > 1).forEach(seg => {
@@ -14790,6 +14904,8 @@ function showReadout() {
   SPEC[hist.kind].readout(p).forEach(([label, value]) => {
     const s = el("span"); s.append(label + ": ", el("b", "", value)); box.appendChild(s);
   });
+  const note = SPEC[hist.kind].note && SPEC[hist.kind].note(p, h);
+  if (note) box.appendChild(el("div", "note" + (note[1] ? " bad" : ""), note[0]));
 }
 
 function selectAt(clientX) {

@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-180000"
+__version__ = "1.1.20261029-190000"
 import json
 import re
 
@@ -4970,6 +4970,48 @@ for _it, _tr in {
     'Indirizzo completo della sonda': ('Full probe address', 'Vollständige Adresse der Sonde', 'Adresse complète de la sonde'),
     "L'installazione lo compone da sola dal dominio. Scrivilo così com'è dove serve l'indirizzo intero: pagina locale della sonda (sezione Server), config.yaml o Home Assistant.": ("The installer builds it from the domain on its own. Enter it as is wherever the full address is needed: the probe's local page (Server section), config.yaml or Home Assistant.", 'Die Installation setzt sie selbst aus der Domain zusammen. Gib sie unverändert dort ein, wo die vollständige Adresse gebraucht wird: lokale Seite der Sonde (Abschnitt Server), config.yaml oder Home Assistant.', "L'installation la compose toute seule à partir du domaine. Saisis-la telle quelle là où l'adresse complète est demandée : page locale de la sonde (section Serveur), config.yaml ou Home Assistant."),
     "Dove serve l'indirizzo intero (pagina locale della sonda, config.yaml, Home Assistant) scrivi:": ("Where the full address is needed (the probe's local page, config.yaml, Home Assistant) enter:", 'Wo die vollständige Adresse gebraucht wird (lokale Seite der Sonde, config.yaml, Home Assistant), gib ein:', "Là où l'adresse complète est demandée (page locale de la sonde, config.yaml, Home Assistant), saisis :"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+# Grafico del ping: disservizi notificati e ping persi senza avviso
+for _it, _tr in {
+    "Disservizi": ("Outages", "Ausfälle", "Interruptions"),
+    "Disservizio (notificato)": ("Outage (notified)", "Ausfall (gemeldet)", "Interruption (notifiée)"),
+    "Disservizio in corso: notifica inviata alle {0}, ancora senza risposta.":
+        ("Outage in progress: notification sent at {0}, still not responding.",
+         "Ausfall läuft: Benachrichtigung um {0} gesendet, weiterhin keine Antwort.",
+         "Interruption en cours : notification envoyée à {0}, toujours sans réponse."),
+    "Disservizio: notifica inviata alle {0}, di nuovo raggiungibile alle {1} ({2} senza risposta).":
+        ("Outage: notification sent at {0}, reachable again at {1} ({2} without response).",
+         "Ausfall: Benachrichtigung um {0} gesendet, ab {1} wieder erreichbar ({2} ohne Antwort).",
+         "Interruption : notification envoyée à {0}, de nouveau joignable à {1} ({2} sans réponse)."),
+    "Ping persi": ("Lost pings", "Verlorene Pings", "Pings perdus"),
+    "Ping persi senza avviso": ("Lost pings without alert", "Verlorene Pings ohne Meldung", "Pings perdus sans alerte"),
+    "Ultimo disservizio": ("Last outage", "Letzter Ausfall", "Dernière interruption"),
+    "nessuno nel periodo": ("none in this period", "keiner im Zeitraum", "aucune sur la période"),
+    "{0} in tutto": ("{0} in total", "{0} insgesamt", "{0} au total"),
+    "{0} senza avviso": ("{0} without alert", "{0} ohne Meldung", "{0} sans alerte"),
+    "durata {0}": ("lasted {0}", "Dauer {0}", "durée {0}"),
+    "in corso": ("in progress", "läuft", "en cours"),
+    "{0} su {1}, nessuna notifica.": ("{0} out of {1}, no notification.", "{0} von {1}, keine Benachrichtigung.",
+                                       "{0} sur {1}, aucune notification."),
+    "{0} su {1}: dispositivo con priorità Mai, nessuna notifica.":
+        ("{0} out of {1}: device with Never priority, no notification.",
+         "{0} von {1}: Gerät mit Priorität Nie, keine Benachrichtigung.",
+         "{0} sur {1} : appareil en priorité Jamais, aucune notification."),
+    "{0} su {1}: meno di {2} di fila, la soglia dell'allarme, quindi nessuna notifica.":
+        ("{0} out of {1}: fewer than {2} in a row, the alert threshold, so no notification.",
+         "{0} von {1}: weniger als {2} hintereinander, die Alarmschwelle, daher keine Benachrichtigung.",
+         "{0} sur {1} : moins de {2} d'affilée, le seuil d'alerte, donc aucune notification."),
+    "{0} su {1}: sonda in pausa, nessuna notifica.":
+        ("{0} out of {1}: probe paused, no notification.", "{0} von {1}: Sonde pausiert, keine Benachrichtigung.",
+         "{0} sur {1} : sonde en pause, aucune notification."),
+    "1 controllo fallito": ("1 failed check", "1 fehlgeschlagene Prüfung", "1 contrôle échoué"),
+    "{0} controlli falliti": ("{0} failed checks", "{0} fehlgeschlagene Prüfungen", "{0} contrôles échoués"),
+    "{0} min": ("{0} min", "{0} Min.", "{0} min"),
+    "{0} h {1} min": ("{0} h {1} min", "{0} Std. {1} Min.", "{0} h {1} min"),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)

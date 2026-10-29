@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261029-180000
+# netmon versione 1.1.20261029-190000
 # Compila «Firma NetMon» da tools/firma/src (Go, solo libreria standard), su Linux o macOS:
 #   - tools/windows/FirmaNetMon.exe                                   (Windows 10/11, 64 bit, con icona)
 #   - tools/mac/Firma NetMon.app/Contents/MacOS/firma-netmon-arm64    (Mac Apple Silicon)

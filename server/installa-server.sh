@@ -10,7 +10,7 @@
 # Verifica il sistema, installa i pacchetti, chiede le informazioni necessarie (dominio,
 # notifiche), prova email/Telegram/ntfy, configura HTTPS e alla fine mostra le informazioni
 # da conservare. Si può rilanciare quando si vuole: configurazione, account e storico restano.
-NETMON_VERSION="1.1.20261029-180000"
+NETMON_VERSION="1.1.20261029-190000"
 
 set -uo pipefail
 

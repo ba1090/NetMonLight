@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-180000*
+*Versione di netmon: 1.1.20261029-190000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -634,7 +634,8 @@ CPU, memoria e disco hanno la scala fissa da 0 a 100% e si registrano dalla vers
 **Voci dei grafici.** Sotto ogni grafico le voci della legenda sono pulsanti: toccandole
 mostri o nascondi la relativa linea, e la scala verticale si adatta alle sole voci visibili.
 Traffico: Download, Upload, Media download, Media upload (linee tratteggiate con la media del
-periodo). Ping: Media, Minimo–massimo, Pacchetti persi, Media del periodo (spenta di default).
+periodo). Ping: Media, Minimo–massimo, Disservizio (notificato), Ping persi senza avviso, Media del periodo
+(spenta di default).
 Nel grafico delle metriche FRITZ!Box si sceglie invece una sola metrica alla volta dal menu
 *Metrica*, e la scala si adatta a quella metrica.
 La scelta resta salvata nel browser.
@@ -920,9 +921,19 @@ schede, con una riga sottile e una barretta colorata che separano le parti:
 
 Con più sonde, in *Controlli* e *Notifiche* si sceglie la sonda da un menu.
 
-Accanto a ogni dispositivo il pulsante con il **battito** apre lo storico dei ping: minimo, media, massimo
-e percentuale di pacchetti persi, con grafico su 1 ora, 6 ore, 24 ore, 7 o 30 giorni. La banda
-chiara indica l'intervallo min-max, la linea la media, le barre rosse i controlli senza risposta.
+Accanto a ogni dispositivo il pulsante con il **battito** apre lo storico dei ping, con grafico su 1 ora, 6 ore,
+24 ore, 7 o 30 giorni. In alto: minimo, media e massimo; **Disservizi** (quanti e quanto sono durati in tutto);
+**Ping persi** (percentuale, e quanti senza avviso); **Ultimo disservizio** (inizio e durata). Nel grafico la banda
+chiara indica l'intervallo min-max e la linea la media. Le perdite hanno due segni diversi:
+
+- **Disservizio (notificato)**: fascia rossa a tutta altezza, dal primo controllo fallito al ritorno. C'è solo
+  dove è partito un avviso («non risponde», o «Nessun dispositivo risponde» per tutta la rete);
+- **Ping persi senza avviso**: tacca gialla sull'asse, più alta se nel punto sono falliti più controlli. Sono
+  controlli falliti che non hanno fatto scattare l'allarme.
+
+Toccando un punto, sotto il grafico si legge cosa è successo: «Disservizio: notifica inviata alle 13:12, di
+nuovo raggiungibile alle 13:16 (6 min senza risposta)», oppure, per una tacca, perché non è partita la notifica
+(meno controlli falliti di fila della soglia, priorità *Mai*, sonda in pausa).
 I campioni restano in `events.db` per il periodo scelto dall'amministratore (vedi *Conservazione
 dei dati*); per i periodi più lunghi di 30 giorni usa *Personalizzato* con le date.
 

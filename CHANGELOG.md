@@ -7,8 +7,13 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-180000 · 9 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-190000 · 10 versioni) — NetMon Light
 
+- **Grafico del ping: disservizi distinti dai ping persi**. I disservizi notificati sono fasce rosse a tutta
+  altezza dal primo controllo fallito al ritorno, ricostruite dagli avvisi registrati; i ping persi senza
+  avviso sono tacche gialle sull'asse, alte quanto la parte di controlli falliti. In alto i riquadri
+  *Disservizi*, *Ping persi* e *Ultimo disservizio*; toccando un punto si legge se è partita la notifica
+  (e quando è tornato) o perché no (soglia, priorità *Mai*, sonda in pausa). *Pagina utente, server.*
 - **Sonde più nuove del server** (da NetMon): una sonda con programmi più recenti di quelli che il server
   distribuisce (per esempio aggiornata a mano con un pacchetto più nuovo) risulta aggiornata: niente più
   *Aggiorna netmon* nella dashboard, *da aggiornare* nel pannello o aggiornamenti programmati che la sonda
