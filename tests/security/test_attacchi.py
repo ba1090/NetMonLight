@@ -397,3 +397,20 @@ def test_first_account_with_access_code(client, admin, monkeypatch):
     r = client.post("/api/auth/register", json={"token": code, "email": new_email("primo"), "password": PASSWORD})
     assert r.status_code == 200, r.text
     client.cookies.clear()
+
+
+def test_import_keeps_notification_channels(tmp_path, make_user, admin):
+    """I canali di notifica dell'utente (chat Telegram, topic ntfy, interruttori) arrivano con l'import."""
+    email, key = new_email("canali"), "p_" + secrets.token_hex(6)
+
+    def change(acc):
+        acc["user"].update(email=email, telegram_chat="123456789", telegram_on=1,
+                           ntfy_url="https://ntfy.sh/prova-canali", ntfy_on=0)
+        acc["probes"][0].update(key=key, token_hash=secrets.token_hex(32))
+    tid = "c" + secrets.token_hex(10)
+    assert _upload(admin, _crafted(tmp_path, make_user, change), tid).status_code == 200
+    r = admin.post("/api/admin/transfer/import", {"id": tid, "password": admin.password})
+    assert _job(admin, r.json()["id"])["state"] == "done"
+    with netmon.auth._conn() as c:
+        row = c.execute("SELECT telegram_chat, telegram_on, ntfy_url, ntfy_on FROM users WHERE email = ?", (email,)).fetchone()
+    assert row == ("123456789", 1, "https://ntfy.sh/prova-canali", 0)
