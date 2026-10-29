@@ -7,8 +7,22 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-120000 · 4 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-140000 · 5 versioni) — NetMon Light
 
+- **Sicurezza, dopo un test con gli attacchi più noti** (nessuna vulnerabilità trovata; questi i rinforzi):
+  - *CSP con le impronte degli script*: sito, dashboard, pannello, informativa e pagina locale della sonda non
+    permettono più script scritti nella pagina in generale (`'unsafe-inline'`), ma solo i loro, ognuno con la
+    sua impronta SHA-256: anche con un difetto futuro un testo arrivato dalla rete non diventa codice.
+  - *Schermata d'accesso unica*: risposta e tempi uguali per ogni email anche quando scattano i limiti del
+    pannello, così non si scopre quali indirizzi sono di un amministratore.
+  - *Tentativi distribuiti*: oltre 50 password sbagliate in un'ora da almeno 5 indirizzi per lo stesso account,
+    avviso agli amministratori (al massimo ogni 6 ore per account), senza bloccare il proprietario.
+  - *Importa un utente*: dal file solo i campi previsti dell'account e delle sonde (mai il segno di primo
+    utente, i codici di conferma in sospeso o l'autorizzazione della chiave del server); piano, limiti,
+    scadenza e blocco si vedono prima di importare; file malformati o con token di sonde già in uso qui sono
+    rifiutati prima di cominciare (prima: «Errore interno»).
+  - *Prove*: `tests/security/test_attacchi.py` rifà gli attacchi a ogni modifica (93 prove).
+  *Server, pannello, sonda.*
 - **Indirizzo del server della sonda cambiato dalla pagina** (da NetMon): in *Impostazioni → Sonde* il nuovo
   comando *Indirizzo del server* (con la password dell'account) manda la sonda a un altro server, per esempio
   dopo un cambio di dominio o un backup completo ripristinato su un'altra VM. La sonda prova il nuovo indirizzo

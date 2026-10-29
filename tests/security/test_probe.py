@@ -134,6 +134,22 @@ def test_local_page_requires_password(local_page):
     assert r.status_code == 200
 
 
+def test_local_page_csp_only_its_scripts(local_page):
+    """Pagina locale: niente 'unsafe-inline' per gli script, solo le impronte di quelli della pagina."""
+    import hashlib
+    import re
+    cw, base, port = local_page
+    cw._auth_fails.clear()
+    r = httpx.get(base + "/", headers=auth())
+    assert r.status_code == 200
+    script_src = re.search(r"script-src([^;]*)", r.headers["content-security-policy"]).group(1)
+    assert "unsafe-inline" not in script_src
+    scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", r.text, re.S | re.I)
+    assert scripts
+    for sc in scripts:
+        assert base64.b64encode(hashlib.sha256(sc.encode()).digest()).decode() in script_src
+
+
 def test_local_page_masks_secrets(local_page):
     cw, base, port = local_page
     cw._auth_fails.clear()

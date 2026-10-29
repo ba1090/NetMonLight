@@ -2,7 +2,7 @@
 
 File generato da tools/importa-sito.py dallo zip netmon-sito: non modificarlo a mano,
 rifai l'importazione con la pagina nuova."""
-__version__ = "1.1.20261029-120000"
+__version__ = "1.1.20261029-140000"
 SITO_VERSION = "1.0.20261024-231919"
 
 PAGES = {

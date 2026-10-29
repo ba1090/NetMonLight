@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-120000"
+__version__ = "1.1.20261029-140000"
 VERSION = __version__
 import asyncio
 import base64
@@ -2102,9 +2102,24 @@ app = FastAPI(title="netmon", lifespan=lifespan, docs_url=None, redoc_url=None, 
 # Intestazioni di sicurezza per tutte le risposte. Le pagine hanno script e stili nel file stesso
 # (per questo 'unsafe-inline') e non caricano niente da altri siti, nemmeno i caratteri (vedi
 # fonts.py); nessuna pagina può essere incorniciata da un altro sito (niente clickjacking).
-CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
-       "style-src 'self' 'unsafe-inline'; font-src 'self'; "
-       "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+CSP_TEMPLATE = ("default-src 'self'; script-src 'self'{scripts}; "
+                "style-src 'self' 'unsafe-inline'; font-src 'self'; "
+                "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "
+                "object-src 'none'")
+# Senza un'eccezione nessuno script scritto nella pagina parte. Le pagine di netmon (dashboard, pannello,
+# sito, informativa) dichiarano l'impronta SHA-256 di ognuno dei loro script (page_csp): parte solo
+# quello che c'era nella pagina inviata dal server, non uno infilato da un testo che arriva dalla rete.
+CSP = CSP_TEMPLATE.format(scripts="")
+_SCRIPT_RE = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.S | re.I)
+
+
+def page_csp(html) -> str:
+    """CSP con le impronte degli script della pagina (al posto di 'unsafe-inline')."""
+    if isinstance(html, bytes):
+        html = html.decode("utf-8", "replace")
+    hashes = sorted({base64.b64encode(hashlib.sha256(m.encode()).digest()).decode()
+                     for m in _SCRIPT_RE.findall(html)})
+    return CSP_TEMPLATE.format(scripts="".join(f" 'sha256-{h}'" for h in hashes))
 SECURITY_HEADERS = {"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
                     "Referrer-Policy": "no-referrer"}
 
@@ -2696,6 +2711,55 @@ def send_verify_email(uid, email, base, lang="it"):
 account_throttle = Throttle(max_fails=30, window=15 * 60)
 
 
+class SprayWatch:
+    """Tentativi distribuiti: password sbagliate per la stessa email da tanti indirizzi diversi.
+
+    I limiti per IP e per coppia IP-account non li fermano (ogni indirizzo ne fa pochi), e bloccare
+    l'account permetterebbe a chiunque di tenere fuori il proprietario apposta. Quindi nessun blocco:
+    oltre `fails` errori in `window` secondi da almeno `min_ips` indirizzi parte un avviso agli
+    amministratori (spray_check), al massimo ogni 6 ore per account."""
+
+    MAX_KEYS = 10_000
+
+    def __init__(self, fails=50, window=3600, min_ips=5):
+        self.fails, self.window, self.min_ips = fails, window, min_ips
+        self._seen: dict[str, list] = {}
+
+    def fail(self, email, ip, now=None):
+        """Registra un errore; restituisce (errori, indirizzi) quando si supera la soglia."""
+        now = now or time.time()
+        if len(self._seen) >= self.MAX_KEYS:
+            self._seen = {k: v for k, v in self._seen.items() if now - v[-1][0] < self.window}
+            if len(self._seen) >= self.MAX_KEYS:
+                return None                       # memoria limitata: niente voci nuove finché non scadono
+        recent = [x for x in self._seen.get(email, ()) if now - x[0] < self.window][-(self.fails * 4):]
+        recent.append((now, ip))
+        self._seen[email] = recent
+        ips = {x[1] for x in recent}
+        if len(recent) >= self.fails and len(ips) >= self.min_ips:
+            return len(recent), len(ips)
+        return None
+
+
+spray = SprayWatch()
+
+
+def spray_check(email, ip):
+    """Conta una password sbagliata per l'avviso dei tentativi distribuiti (solo account esistenti)."""
+    hit = spray.fail(email, ip) if email else None
+    if not hit or not (auth.email_registered(email) or auth.is_admin_email(email)):
+        return
+    fails, ips = hit
+    log.warning("Tentativi distribuiti su %s: %d password sbagliate da %d indirizzi in un'ora", email, fails, ips)
+    admin_notice(f"[ALERT] Tentativi di accesso distribuiti su {email}",
+                 f"Nell'ultima ora l'account {email} ha ricevuto {fails} password sbagliate da {ips} indirizzi "
+                 "diversi: qualcuno sta provando a indovinarne la password da più reti.\n\n"
+                 "L'account non viene bloccato (il proprietario continua a entrare con la sua password). "
+                 "Se la password è debole o usata anche altrove, chiedi al proprietario di cambiarla; per un "
+                 "amministratore resta comunque il codice dell'app di autenticazione.",
+                 ok=False, gap_key="spray:" + email, gap=6 * 3600)
+
+
 def too_many(*keys, limiter=None):
     """429 se le chiavi hanno troppi errori recenti (o tentativi in corso); altrimenti il tentativo
     viene contato come in corso fino alla fine della richiesta."""
@@ -2893,14 +2957,22 @@ async def auth_login(b: LoginBody, request: Request):
         # Schermata d'accesso unica: credenziali di un amministratore -> si prosegue nel pannello
         # (codice dell'app, cambio della password provvisoria). Tentativi e blocchi sono quelli
         # dell'accesso al pannello; se non va, l'errore conta anche come tentativo da utente.
+        # I limiti del pannello sui tentativi (429) qui diventano «password non corretta», come per
+        # qualunque email: altrimenti la risposta direbbe quali indirizzi sono di un amministratore.
+        # Il blocco dopo i codici sbagliati (423) resta: lo vede solo chi ha la password giusta.
         try:
             return await admin_password_step(email, b.password, request, {"redirect": "/admin"})
         except HTTPException as e:
-            if e.status_code != 401:
+            if e.status_code not in (401, 429):
                 raise
+            if e.status_code == 429:                  # password non controllata: stessi tempi comunque
+                await asyncio.to_thread(auth.burn_password_check, b.password)
+    elif uid is None:
+        await asyncio.to_thread(auth.burn_password_check, b.password)   # stessi tempi delle email del pannello
     if uid is None:
         throttle.fail("ip:" + ip)
         account_throttle.fail(pair)
+        await asyncio.to_thread(spray_check, email, ip)
         log.warning("Accesso non riuscito per %s da %s", email or "?", ip)
         raise HTTPException(status_code=401, detail="Utente o password non corretti.")
     if uid == -2:
@@ -3836,6 +3908,8 @@ async def admin_password_step(login_in: str, password: str, request: Request, ex
         admin_throttle.fail("ip:" + ip)
         admin_pw_throttle.fail(pair)
         admin_account_throttle.fail("acct:" + login)
+        if extra is None:                         # dalla schermata d'accesso unica lo conta auth_login
+            await asyncio.to_thread(spray_check, login, ip)
         log.warning("Amministrazione: accesso non riuscito per %s da %s", login or "?", ip)
         raise HTTPException(status_code=401, detail="Email o password non corretti.")
     admin_throttle.success("ip:" + ip)
@@ -4980,6 +5054,26 @@ def transfer_clean():
                 pass
 
 
+# Campi che «Importa un utente» copia dal file: quelli dell'account e delle sue sonde. Restano fuori
+# l'id, il segno di primo utente (is_admin), i codici di conferma dell'email in sospeso e key_ok delle
+# sonde (chiave del server accettata): li decide questo server, non il file.
+TRANSFER_USER_FIELDS = (
+    "email", "pw_hash", "created", "pw_changed", "telegram_chat", "ntfy_url", "notify_email", "telegram_on",
+    "ntfy_on", "layout", "view_prefs", "dash_prefs", "notify_routes", "must_change", "last_seen", "blocked",
+    "email_verified", "max_probes", "max_fritz", "max_devices", "plan", "ret_value", "ret_unit", "expires",
+    "expiry_warned", "expired", "st_prefs", "probe_auto", "tz", "lang")
+TRANSFER_PROBE_FIELDS = ("key", "token_hash", "created", "name", "token_used", "inst", "dup", "paused",
+                         "paused_until", "paused_note")
+TRANSFER_PAUSE_FIELDS = ("probe", "device", "until", "note", "created")
+TRANSFER_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+TRANSFER_HASH_RE = re.compile(r"scrypt\$\d+\$\d+\$\d+\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+")
+
+
+def transfer_pick(row, fields):
+    """Solo i campi ammessi, con valori semplici (niente liste o oggetti dove il database vuole testo o numeri)."""
+    return {k: row[k] for k in fields if k in row and (row[k] is None or isinstance(row[k], (str, int, float)))}
+
+
 def transfer_read(path):
     """Manifesto, account e stato di uno zip di trasferimento, dopo averlo controllato."""
     import zipfile
@@ -5002,8 +5096,18 @@ def transfer_read(path):
             raise HTTPException(status_code=422, detail="Formato dello zip non riconosciuto: esportalo di nuovo "
                                                         "con una versione aggiornata di netmon.")
         user, probes = acc.get("user") or {}, acc.get("probes") or []
-        if not user.get("email") or not user.get("pw_hash") or not isinstance(probes, list):
+        pauses = acc.get("pauses") or []
+        if (not isinstance(user, dict) or not isinstance(user.get("email"), str) or not isinstance(user.get("pw_hash"), str)
+                or not isinstance(probes, list) or not isinstance(pauses, list)
+                or not all(isinstance(p, dict) and isinstance(p.get("key"), str) for p in probes)):
             raise HTTPException(status_code=422, detail="Zip di trasferimento incompleto.")
+        if (not TRANSFER_HASH_RE.fullmatch(user["pw_hash"])
+                or not all(TRANSFER_KEY_RE.fullmatch(p["key"]) for p in probes)
+                or len({p["key"] for p in probes}) != len(probes)):
+            raise HTTPException(status_code=422, detail="Zip di trasferimento danneggiato.")
+        acc = {"user": transfer_pick(user, TRANSFER_USER_FIELDS),
+               "probes": [transfer_pick(p, TRANSFER_PROBE_FIELDS) for p in probes],
+               "pauses": [transfer_pick(d, TRANSFER_PAUSE_FIELDS) for d in pauses if isinstance(d, dict)]}
         return man, acc, state if isinstance(state, dict) else {}
 
 
@@ -5015,14 +5119,29 @@ def transfer_preview(path):
         row = c.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         marks = ",".join("?" * len(keys))
         clash = [r[0] for r in c.execute(f"SELECT key FROM probes WHERE key IN ({marks})", keys)] if keys else []
+        # stesso token di una sonda che c'è già (lo stesso file importato con un'altra email, o modificato)
+        hashes = {p["token_hash"]: p["key"] for p in acc["probes"] if p.get("token_hash")}
+        if hashes:
+            hm = ",".join("?" * len(hashes))
+            clash += [hashes[r[0]] for r in c.execute(f"SELECT token_hash FROM probes WHERE token_hash IN ({hm})",
+                                                       list(hashes)) if hashes[r[0]] not in clash]
         # account già qui: si può importare solo lo storico, sulle sue sonde
         mine = [{"key": r[0], "name": r[1] or r[0]} for r in
                 c.execute("SELECT key, name FROM probes WHERE owner = ? ORDER BY name", (row[0],))] if row else []
     return {"email": email, "source_version": man.get("source_version"), "created": fmt_when(man.get("created")),
             "probes": [p.get("name") or p["key"] for p in acc["probes"]], "rows": man.get("rows") or {},
-            "exists": row is not None, "clash": clash,
+            "exists": row is not None, "clash": clash, "account": transfer_account_info(acc["user"]),
             "source": [{"key": p["key"], "name": p.get("name") or p["key"]} for p in acc["probes"]],
             "target": mine, "suggested": transfer_suggest(acc["probes"], mine) if row else {}}
+
+
+def transfer_account_info(user):
+    """Piano, limiti, scadenza e blocco scritti nel file: l'amministratore li vede prima di importare."""
+    lim = {k: user.get(k) for k in ("max_probes", "max_fritz", "max_devices") if isinstance(user.get(k), int)}
+    exp = user.get("expires")
+    return {"plan": str(user.get("plan") or "")[:20], "limits": lim,
+            "expires": fmt_when(exp) if isinstance(exp, (int, float)) and exp > 0 else "",
+            "blocked": bool(user.get("blocked"))}
 
 
 def transfer_suggest(source, target):
@@ -6981,7 +7100,7 @@ async def admin_page(request: Request):
                "X-Robots-Tag": "noindex", "Vary": "Cookie, Accept-Language"}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
-    return HTMLResponse(page, headers=headers)
+    return HTMLResponse(page, headers={**headers, "Content-Security-Policy": PAGE_CSP[etag]})
 
 
 # ------------------------------------------------------------------ logo e icone (pubbliche)
@@ -7083,7 +7202,8 @@ async def privacy_page(request: Request):
         body = body.replace(f"__NETMON_CONSERVAZIONE_{lang.upper()}__".encode(), durata.encode())
     body = body.replace(b"__NETMON_LANG__", request_lang(request, user).encode())
     body = body.replace(b"__NETMON_LOGO__", _LOGO_INLINE.encode())
-    return Response(body, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
+    return Response(body, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-cache", "Content-Security-Policy": page_csp(body)})
 
 
 @app.get("/health")
@@ -8510,7 +8630,7 @@ async def status(request: Request):
                "Vary": "Cookie, Accept-Language", "Content-Language": lang}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
-    return HTMLResponse(page, headers=headers)
+    return HTMLResponse(page, headers={**headers, "Content-Security-Policy": PAGE_CSP[etag]})
 
 
 @app.get("/status")
@@ -8539,7 +8659,7 @@ def sito_reply(request: Request, lang: str):
     headers = {"Cache-Control": "no-cache", "ETag": etag, "Content-Language": lang}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
-    return HTMLResponse(page, headers=headers)
+    return HTMLResponse(page, headers={**headers, "Content-Security-Policy": PAGE_CSP[etag]})
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -8959,7 +9079,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-120000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-140000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -17415,7 +17535,15 @@ $("#im-up").onclick = async () => {
     }
     if (p.clash.length) return say("#im-msg", `${desc}. Ci sono già sonde con le stesse chiavi (${p.clash.join(", ")}).`, true);
     IM = { id, email: p.email };
-    say("#im-msg", `${desc}. Pronto per l'importazione.` + (res.plain ? " Attenzione: file non cifrato (esportato da una versione precedente)." : ""));
+    // piano, limiti, scadenza e blocco arrivano dal file: si vedono prima di confermare (poi si cambiano da Azioni ▾)
+    const ac = p.account || {}, lim = ac.limits || {}, conto = [];
+    conto.push(ac.plan ? `piano ${ac.plan}` : "piano predefinito");
+    if (lim.max_probes != null) conto.push(`massimo ${lim.max_probes} sonde`);
+    if (lim.max_devices != null) conto.push(`massimo ${lim.max_devices} dispositivi`);
+    if (lim.max_fritz != null) conto.push(`massimo ${lim.max_fritz} FRITZ!Box`);
+    if (ac.expires) conto.push(`scade il ${ac.expires}`);
+    if (ac.blocked) conto.push("account bloccato");
+    say("#im-msg", `${desc}. Dal file: ${conto.join(", ")}. Pronto per l'importazione.` + (res.plain ? " Attenzione: file non cifrato (esportato da una versione precedente)." : ""));
     $("#im-confirm").hidden = false; $("#im-pass").value = ""; $("#im-pass").focus();
   } catch (e) { say("#im-msg", e.message, true); }
   finally { $("#im-up").disabled = false; }
@@ -18869,3 +18997,5 @@ for _lang in i18n.LANGS:
     _p = (ADMIN_PAGE.replace('<html lang="it">', f'<html lang="{_lang}">', 1)
           .replace("</title>", "</title>\n" + i18n.page_script(_lang, admin=True), 1))
     ADMIN_PAGES[_lang] = (_p, '"' + hashlib.sha256(_p.encode()).hexdigest()[:16] + '"')
+# CSP di ogni pagina, per ETag: le impronte dei suoi script si calcolano una volta sola
+PAGE_CSP = {etag: page_csp(page) for pages in (STATUS_PAGES, ADMIN_PAGES, SITO_PAGES) for page, etag in pages.values()}

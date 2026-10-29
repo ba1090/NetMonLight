@@ -65,6 +65,7 @@ def _reset_limits():
         t._busy.clear()
     for name in ("report_limit", "backfill_limit", "bulk_rows_limit"):
         getattr(netmon, name)._state.clear()
+    netmon.spray._seen.clear()
 
 
 @pytest.fixture(autouse=True)

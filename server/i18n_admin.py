@@ -3,7 +3,7 @@ francese). Stesso formato di TRANSLATIONS in i18n.py: chiave il testo italiano, 
 Stanno a parte perché la pagina utente non le carica (sono solo per il pannello e i suoi avvisi).
 Per i testi nuovi: python3 tools/i18n-estrai.py admin --mancanti
 """
-__version__ = "1.1.20261029-120000"
+__version__ = "1.1.20261029-140000"
 
 ADMIN_TRANSLATIONS = {
     "en": {
@@ -2895,3 +2895,31 @@ for _it, _tr in _BACKUP.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
 del _BACKUP, _it, _tr, _lang, _text
+
+# Tentativi di accesso distribuiti e anteprima di «Importa un utente» (piano e limiti dal file)
+_SICUREZZA = {
+    "Tentativi di accesso distribuiti su {0}": ("Distributed sign-in attempts on {0}", "Verteilte Anmeldeversuche für {0}",
+                                                 "Tentatives de connexion distribuées sur {0}"),
+    "Nell'ultima ora l'account {0} ha ricevuto {1} password sbagliate da {2} indirizzi diversi: qualcuno sta provando a indovinarne la password da più reti.":
+        ("In the last hour the account {0} received {1} wrong passwords from {2} different addresses: someone is trying to guess its password from several networks.",
+         "In der letzten Stunde hat das Konto {0} {1} falsche Passwörter von {2} verschiedenen Adressen erhalten: jemand versucht, das Passwort aus mehreren Netzen zu erraten.",
+         "Au cours de la dernière heure, le compte {0} a reçu {1} mots de passe erronés depuis {2} adresses différentes : quelqu'un essaie de deviner son mot de passe depuis plusieurs réseaux."),
+    "L'account non viene bloccato (il proprietario continua a entrare con la sua password). Se la password è debole o usata anche altrove, chiedi al proprietario di cambiarla; per un amministratore resta comunque il codice dell'app di autenticazione.":
+        ("The account is not blocked (the owner keeps signing in with their password). If the password is weak or used elsewhere too, ask the owner to change it; an administrator is still protected by the authenticator app code.",
+         "Das Konto wird nicht gesperrt (der Inhaber meldet sich weiter mit seinem Passwort an). Ist das Passwort schwach oder auch anderswo verwendet, bitte den Inhaber, es zu ändern; ein Administrator ist weiterhin durch den Code der Authenticator-App geschützt.",
+         "Le compte n'est pas bloqué (le propriétaire continue de se connecter avec son mot de passe). Si le mot de passe est faible ou utilisé ailleurs, demande au propriétaire de le changer ; un administrateur reste protégé par le code de l'application d'authentification."),
+    "account bloccato": ("account blocked", "Konto gesperrt", "compte bloqué"),
+    "massimo {0} FRITZ!Box": ("at most {0} FRITZ!Box", "höchstens {0} FRITZ!Box", "au maximum {0} FRITZ!Box"),
+    "massimo {0} dispositivi": ("at most {0} devices", "höchstens {0} Geräte", "au maximum {0} appareils"),
+    "massimo {0} sonde": ("at most {0} probes", "höchstens {0} Sonden", "au maximum {0} sondes"),
+    "piano predefinito": ("default plan", "Standardtarif", "formule par défaut"),
+    "piano {0}": ("plan {0}", "Tarif {0}", "formule {0}"),
+    "scade il {0}": ("expires on {0}", "läuft am {0} ab", "expire le {0}"),
+    "{0}. Dal file: {1}. Pronto per l'importazione.{2}": ("{0}. From the file: {1}. Ready to import.{2}",
+                                                          "{0}. Aus der Datei: {1}. Bereit zum Import.{2}",
+                                                          "{0}. Depuis le fichier : {1}. Prêt pour l'importation.{2}"),
+}
+for _it, _tr in _SICUREZZA.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
+del _SICUREZZA, _it, _tr, _lang, _text

@@ -6,7 +6,7 @@ Il database (auth.db) non contiene nulla di riutilizzabile se venisse copiato:
   soltanto nel cookie del browser.
 Il file viene creato con permessi 600 (leggibile solo dall'utente del servizio).
 """
-__version__ = "1.1.20261029-120000"
+__version__ = "1.1.20261029-140000"
 import ipaddress
 import base64
 import hashlib
@@ -1219,6 +1219,13 @@ class AuthDB:
         if not verify_password(password, row[1]):
             return None
         return (-2 if row[3] else -1) if row[2] else row[0]
+
+    @staticmethod
+    def burn_password_check(password: str):
+        """Una verifica a vuoto, per pareggiare i tempi: la schermata d'accesso unica controlla anche
+        la password da amministratore per le email del pannello, e senza questa le altre email
+        risponderebbero prima (si capirebbe quali indirizzi sono di un amministratore)."""
+        verify_password(password, _DUMMY)
 
     def check_password(self, user_id: int, password: str) -> bool:
         with self._conn() as c:

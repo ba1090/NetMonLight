@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-120000*
+*Versione di netmon: 1.1.20261029-140000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -1909,6 +1909,23 @@ si blocca per 15 minuti. Contano anche i tentativi ancora in corso: mandarne mol
 aggira il limite. Con un codice di accesso sbagliato la risposta è sempre *Codice di accesso non
 valido*, anche se l'email ha già un account: così non si può scoprire chi è registrato.
 
+La schermata d'accesso è unica per utenti e amministratori, ma non rivela quali email sono di un
+amministratore: con una password sbagliata la risposta e il tempo di risposta sono gli stessi per ogni email,
+anche quando scattano i limiti dei tentativi del pannello. Solo chi ha la password giusta di un amministratore
+bloccato (troppi codici sbagliati) vede il messaggio del blocco.
+
+**Tentativi distribuiti.** Chi prova a indovinare una password da tante reti diverse fa pochi tentativi da
+ognuna, sotto i limiti per indirizzo. L'account non viene bloccato (altrimenti chiunque potrebbe tenere fuori
+il proprietario apposta), ma oltre **50 password sbagliate in un'ora da almeno 5 indirizzi** per lo stesso
+account (utente o amministratore) gli amministratori ricevono l'avviso *[ALERT] Tentativi di accesso distribuiti
+su …*, al massimo ogni 6 ore per account. Con un avviso così conviene far cambiare la password se è debole o
+usata anche altrove.
+
+**Script delle pagine.** Le pagine (sito, dashboard, pannello, informativa e pagina locale della sonda)
+dichiarano al browser l'impronta di ognuno dei loro script (Content-Security-Policy con `sha256-…`, senza
+`'unsafe-inline'`): il browser esegue solo quelli, quindi un testo arrivato dalla rete e finito in una pagina
+(nome di un dispositivo, SSID…) non può mai diventare codice, nemmeno con un difetto futuro.
+
 **Grafici e Dashboard.** Lo storico si legge senza fermare il resto del server: mentre si
 calcola un grafico lungo (per esempio 30 giorni), i report delle sonde continuano ad arrivare.
 Ogni account calcola al massimo 2 grafici alla volta e ne mette in coda fino a 8; oltre, la
@@ -2273,6 +2290,12 @@ puntarle al nuovo indirizzo (`sudo bash ~/netmon/probe/installa-sonda.sh`, opzio
 oppure il vecchio nome DNS verso questa VM con `OLD_HOSTS`, vedi *Cambiare dominio*). Serve per portare un
 utente da un altro server netmon (anche da una VM di un'installazione NetMon con gateway) o come copia di
 sicurezza.
+
+Prima di *Importa* la pagina mostra cosa arriva dal file oltre a email e sonde: **piano, limiti, scadenza e
+blocco** dell'account (poi si cambiano da *Azioni ▾*). Dal file si prendono solo i campi dell'account e delle
+sonde: mai l'identificativo, il segno di primo utente, i codici di conferma dell'email in sospeso o
+l'autorizzazione della chiave del server per le sonde. Un file con campi malformati, chiavi delle sonde
+doppie o strane, o sonde con un token già in uso su questo server viene rifiutato prima di importare.
 
 Se **l'account esiste già**, *Importa un utente* porta **solo lo storico** (misure, eventi, traffico,
 speedtest, FRITZ!Box): account, sonde, token e impostazioni restano quelli del server. Per ogni sonda del
