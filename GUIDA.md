@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-083000*
+*Versione di netmon: 1.1.20261029-093000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -2030,6 +2030,54 @@ sudo -u netmon /opt/netmon/venv/bin/python /opt/netmon/account.py reset
 ```
 
 ## Backup e ripristino
+
+### Backup completo del server (pannello)
+
+`/admin` → *Server › Backup e ripristino*. Serve per ripartire da zero su una VM nuova, per tornare indietro
+dopo un errore o semplicemente per tenere una copia di tutto.
+
+**Backup completo**: scegli una **password del file** (almeno 12 caratteri, scritta due volte), metti la tua
+password di amministratore e premi **Crea e scarica il backup**. Il browser scarica
+`netmon-backup-<dominio>-<data>.netmon`, cifrato come i file di trasferimento degli utenti (AES-256-GCM, chiave
+ricavata dalla password con scrypt): senza la password del file non si legge nulla, e la password non la salva
+nessuno. Contiene:
+
+- il database degli account (`auth.db`): utenti, amministratori (con la verifica in due passaggi), sonde e
+  loro token, codici di accesso, piani e limiti, impostazioni del pannello (invio email compreso);
+- lo storico (`events.db`): misure, eventi, traffico, SpeedTest, FRITZ!Box;
+- lo stato delle sonde, gli SpeedTest periodici, i controlli di sicurezza, gli utenti non attivi e
+  l'informativa modificata (se c'è).
+
+Restano fuori il file `.env` (chiave del server, bot Telegram, righe `SMTP_…`) e le chiavi della VM: quella con
+cui la VM firma gli aggiornamenti delle sonde e la chiave di rilascio. Gli amministratori ricevono un avviso a
+ogni backup. Conserva il file e la sua password in due posti diversi.
+
+**Ripristino**: scegli il file, scrivi la sua password e premi **Carica e controlla**: il pannello mostra la data
+e la versione del backup, quanti utenti, amministratori e sonde contiene e quanti ce ne sono adesso. Niente è
+ancora cambiato. Per ripristinare scrivi `RIPRISTINA`, la tua password e premi **Ripristina e riavvia**:
+
+1. il server controlla il backup (versione non più recente di quella installata, database integri) e lo prepara;
+2. si riavvia: all'avvio i dati di adesso vanno in `/opt/netmon/data/prima-del-ripristino-<data>/` (resta solo
+   l'ultima copia) e quelli del backup prendono il loro posto;
+3. la pagina si ricarica: accedi con un amministratore **del backup**.
+
+Gli amministratori ricevono un avviso. Per annullare un ripristino, ferma il servizio e rimetti i file dalla
+cartella `prima-del-ripristino-…`:
+
+```bash
+sudo systemctl stop netmon-server
+cd /opt/netmon/data && sudo cp -a prima-del-ripristino-*/. . && sudo chown -R netmon:netmon .
+sudo systemctl start netmon-server
+```
+
+**Su una VM nuova**: installa netmon con `installa-server.sh` (chiede dominio, email e amministratore come
+sempre), accedi a `/admin` con l'amministratore appena creato e ripristina il backup. Le sonde continuano con il
+loro token se il dominio è lo stesso (il record DNS va spostato sulla VM nuova). La VM nuova ha una sua chiave
+per gli aggiornamenti delle sonde: prima di aggiornarle dal pannello, su ogni sonda lancia una volta
+`sudo bash ~/netmon/probe/installa-sonda.sh --aggiorna` e accetta la nuova impronta. Il bot Telegram va rimesso
+nel `.env` (o con *Riconfigurare* dell'installatore).
+
+### Configurazione delle sonde
 
 **Dalla pagina di stato (VM)**: **Impostazioni** → scheda *Account e backup* → *Scarica backup*. Scarica un file
 `netmon-server-DATA.json` con, per ogni sonda, dispositivi, ordine, frequenza, soglie e

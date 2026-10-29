@@ -1,4 +1,4 @@
-# netmon versione 1.1.20261029-083000
+# netmon versione 1.1.20261029-093000
 # Copia in /etc/netprobe/config.yaml e personalizza
 server_url: https://netmonhome.net/api/report
 token: "sonda_INCOLLA-QUI-IL-TOKEN-DELLA-SONDA"     # dashboard: Impostazioni → Sonde → Aggiungi una sonda

@@ -7,8 +7,14 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-083000 · 1 versione) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-093000 · 2 versioni) — NetMon Light
 
+- **Backup completo del server e ripristino dal pannello** (*Server › Backup e ripristino*): un file cifrato con
+  la password scelta da chi lo scarica (come i file di trasferimento) con utenti, amministratori, sonde, storico,
+  codici di accesso e impostazioni del pannello; restano fuori `.env` e chiavi della VM. Il ripristino mostra
+  prima cosa contiene il backup, chiede `RIPRISTINA` e la password, prepara i file e riavvia il servizio: all'avvio
+  i dati di adesso vanno in `data/prima-del-ripristino-<data>/` e quelli del backup prendono il loro posto. Avviso
+  agli amministratori a ogni backup e ripristino. Tradotto in inglese, tedesco e francese. *Pannello, server.*
 - **Disponibilità sul telefono** (da NetMon 1.1.20261028-232258): gli orari sotto le caselle non si accavallano più;
   quelli che toccherebbero il precedente si nascondono («ora» resta) e si ricalcolano a ogni cambio di larghezza.
   *Pagina utente.*

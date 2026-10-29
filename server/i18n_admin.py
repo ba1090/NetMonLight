@@ -3,7 +3,7 @@ francese). Stesso formato di TRANSLATIONS in i18n.py: chiave il testo italiano, 
 Stanno a parte perché la pagina utente non le carica (sono solo per il pannello e i suoi avvisi).
 Per i testi nuovi: python3 tools/i18n-estrai.py admin --mancanti
 """
-__version__ = "1.1.20261029-083000"
+__version__ = "1.1.20261029-093000"
 
 ADMIN_TRANSLATIONS = {
     "en": {
@@ -2778,3 +2778,120 @@ for _it, _tr in {
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
 del _it, _tr, _lang, _text
+
+
+# Backup completo del server e ripristino (Server › Backup e ripristino)
+_BACKUP = {
+    "Backup e ripristino": ("Backup and restore", "Backup und Wiederherstellung", "Sauvegarde et restauration"),
+    "Backup completo": ("Full backup", "Vollständiges Backup", "Sauvegarde complète"),
+    "Ripristino": ("Restore", "Wiederherstellung", "Restauration"),
+    "Tutto il server in un file cifrato: utenti, amministratori, sonde, storico, codici di accesso e impostazioni del pannello (invio email compreso). Senza la password del file non si apre: non la salva nessuno, né il server né il file. Restano fuori il file <code>.env</code> (chiave del server, bot Telegram) e le chiavi della VM.":
+        ("The whole server in an encrypted file: users, administrators, probes, history, access codes and panel settings (email sending included). It does not open without the file password: nobody stores it, neither the server nor the file. Not included: the <code>.env</code> file (server key, Telegram bot) and the VM keys.",
+         "Der ganze Server in einer verschlüsselten Datei: Benutzer, Administratoren, Sonden, Verlauf, Zugangscodes und Einstellungen des Panels (E-Mail-Versand inklusive). Ohne das Passwort der Datei öffnet sie sich nicht: niemand speichert es, weder der Server noch die Datei. Nicht enthalten: die Datei <code>.env</code> (Serverschlüssel, Telegram-Bot) und die Schlüssel der VM.",
+         "Tout le serveur dans un fichier chiffré : utilisateurs, administrateurs, sondes, historique, codes d'accès et réglages du panneau (envoi des emails compris). Sans le mot de passe du fichier, il ne s'ouvre pas : personne ne le conserve, ni le serveur ni le fichier. Restent en dehors le fichier <code>.env</code> (clé du serveur, bot Telegram) et les clés de la VM."),
+    "Tutto il server in un file cifrato: utenti, amministratori, sonde, storico, codici di accesso e impostazioni del pannello (invio email compreso). Senza la password del file non si apre: non la salva nessuno, né il server né il file. Restano fuori il file":
+        ("The whole server in an encrypted file: users, administrators, probes, history, access codes and panel settings (email sending included). It does not open without the file password: nobody stores it, neither the server nor the file. Not included: the file",
+         "Der ganze Server in einer verschlüsselten Datei: Benutzer, Administratoren, Sonden, Verlauf, Zugangscodes und Einstellungen des Panels (E-Mail-Versand inklusive). Ohne das Passwort der Datei öffnet sie sich nicht: niemand speichert es, weder der Server noch die Datei. Nicht enthalten: die Datei",
+         "Tout le serveur dans un fichier chiffré : utilisateurs, administrateurs, sondes, historique, codes d'accès et réglages du panneau (envoi des emails compris). Sans le mot de passe du fichier, il ne s'ouvre pas : personne ne le conserve, ni le serveur ni le fichier. Restent en dehors le fichier"),
+    "(chiave del server, bot Telegram) e le chiavi della VM.":
+        ("(server key, Telegram bot) and the VM keys.", "(Serverschlüssel, Telegram-Bot) und die Schlüssel der VM.",
+         "(clé du serveur, bot Telegram) et les clés de la VM."),
+    "Password del file (almeno 12 caratteri)":
+        ("File password (at least 12 characters)", "Passwort der Datei (mindestens 12 Zeichen)", "Mot de passe du fichier (au moins 12 caractères)"),
+    "Crea e scarica il backup": ("Create and download the backup", "Backup erstellen und herunterladen", "Créer et télécharger la sauvegarde"),
+    "Rimette il server com'era nel backup: <strong>sostituisce tutti</strong> gli utenti, gli amministratori, le sonde e lo storico di adesso. I dati di adesso restano da parte sulla VM, nella cartella <code>data/prima-del-ripristino-…</code>. Il server si riavvia; dopo si accede con un amministratore del backup.":
+        ("Puts the server back as it was in the backup: it <strong>replaces all</strong> current users, administrators, probes and history. The current data is kept aside on the VM, in the folder <code>data/prima-del-ripristino-…</code>. The server restarts; afterwards you sign in with an administrator from the backup.",
+         "Stellt den Server so her, wie er im Backup war: Er <strong>ersetzt alle</strong> aktuellen Benutzer, Administratoren, Sonden und den Verlauf. Die aktuellen Daten bleiben auf der VM im Ordner <code>data/prima-del-ripristino-…</code>. Der Server startet neu; danach meldest du dich mit einem Administrator aus dem Backup an.",
+         "Remet le serveur tel qu'il était dans la sauvegarde : elle <strong>remplace tous</strong> les utilisateurs, administrateurs, sondes et l'historique actuels. Les données actuelles restent de côté sur la VM, dans le dossier <code>data/prima-del-ripristino-…</code>. Le serveur redémarre ; ensuite on se connecte avec un administrateur de la sauvegarde."),
+    "Rimette il server com'era nel backup:": ("Puts the server back as it was in the backup:", "Stellt den Server so her, wie er im Backup war:",
+                                               "Remet le serveur tel qu'il était dans la sauvegarde :"),
+    "sostituisce tutti": ("replaces all", "ersetzt alle", "remplace tous"),
+    "gli utenti, gli amministratori, le sonde e lo storico di adesso. I dati di adesso restano da parte sulla VM, nella cartella":
+        ("current users, administrators, probes and history. The current data is kept aside on the VM, in the folder",
+         "aktuellen Benutzer, Administratoren, Sonden und den Verlauf. Die aktuellen Daten bleiben auf der VM im Ordner",
+         "les utilisateurs, administrateurs, sondes et l'historique actuels. Les données actuelles restent de côté sur la VM, dans le dossier"),
+    "data/prima-del-ripristino-…": ("data/prima-del-ripristino-…", "data/prima-del-ripristino-…", "data/prima-del-ripristino-…"),
+    "File di backup (.netmon)": ("Backup file (.netmon)", "Backup-Datei (.netmon)", "Fichier de sauvegarde (.netmon)"),
+    "Scrivi RIPRISTINA": ("Type RIPRISTINA", "Gib RIPRISTINA ein", "Tape RIPRISTINA"),
+    "Ripristina e riavvia": ("Restore and restart", "Wiederherstellen und neu starten", "Restaurer et redémarrer"),
+    "Preparazione del backup…": ("Preparing the backup…", "Backup wird vorbereitet…", "Préparation de la sauvegarde…"),
+    "Backup scaricato ({0}): {1} utenti, {2} amministratori, {3} sonde. Conservalo insieme alla sua password, ma in due posti diversi.":
+        ("Backup downloaded ({0}): {1} users, {2} administrators, {3} probes. Keep it together with its password, but in two different places.",
+         "Backup heruntergeladen ({0}): {1} Benutzer, {2} Administratoren, {3} Sonden. Bewahre es zusammen mit seinem Passwort auf, aber an zwei verschiedenen Orten.",
+         "Sauvegarde téléchargée ({0}) : {1} utilisateurs, {2} administrateurs, {3} sondes. Conserve-la avec son mot de passe, mais à deux endroits différents."),
+    "Scegli il file di backup.": ("Choose the backup file.", "Wähle die Backup-Datei.", "Choisis le fichier de sauvegarde."),
+    "Scrivi la password del file.": ("Enter the file password.", "Gib das Passwort der Datei ein.", "Saisis le mot de passe du fichier."),
+    "Backup del {0} · netmon {1}": ("Backup of {0} · netmon {1}", "Backup vom {0} · netmon {1}", "Sauvegarde du {0} · netmon {1}"),
+    "Nel backup: {0} utenti, {1} amministratori, {2} sonde ({3})":
+        ("In the backup: {0} users, {1} administrators, {2} probes ({3})", "Im Backup: {0} Benutzer, {1} Administratoren, {2} Sonden ({3})",
+         "Dans la sauvegarde : {0} utilisateurs, {1} administrateurs, {2} sondes ({3})"),
+    "Adesso sul server: {0} utenti, {1} amministratori, {2} sonde: vengono sostituiti":
+        ("Now on the server: {0} users, {1} administrators, {2} probes: they will be replaced",
+         "Jetzt auf dem Server: {0} Benutzer, {1} Administratoren, {2} Sonden: sie werden ersetzt",
+         "Actuellement sur le serveur : {0} utilisateurs, {1} administrateurs, {2} sondes : ils seront remplacés"),
+    "Controlla cosa contiene il backup, poi conferma.": ("Check what the backup contains, then confirm.",
+                                                         "Prüfe, was das Backup enthält, und bestätige dann.",
+                                                         "Vérifie ce que contient la sauvegarde, puis confirme."),
+    "Scrivi RIPRISTINA per confermare.": ("Type RIPRISTINA to confirm.", "Gib RIPRISTINA ein, um zu bestätigen.", "Tape RIPRISTINA pour confirmer."),
+    "Sostituire tutti i dati del server con quelli del backup?": ("Replace all the server data with the backup's?",
+                                                                  "Alle Daten des Servers durch die des Backups ersetzen?",
+                                                                  "Remplacer toutes les données du serveur par celles de la sauvegarde ?"),
+    "Il server si riavvia: dopo accedi con un amministratore del backup.":
+        ("The server restarts: afterwards sign in with an administrator from the backup.",
+         "Der Server startet neu: melde dich danach mit einem Administrator aus dem Backup an.",
+         "Le serveur redémarre : ensuite connecte-toi avec un administrateur de la sauvegarde."),
+    "Ripristino avviato: il server si riavvia…": ("Restore started: the server is restarting…", "Wiederherstellung gestartet: der Server startet neu…",
+                                                  "Restauration lancée : le serveur redémarre…"),
+    "Ripristino completato. Accedi con un amministratore del backup.":
+        ("Restore completed. Sign in with an administrator from the backup.",
+         "Wiederherstellung abgeschlossen. Melde dich mit einem Administrator aus dem Backup an.",
+         "Restauration terminée. Connecte-toi avec un administrateur de la sauvegarde."),
+    "Backup completo del server": ("Full server backup", "Vollständiges Backup des Servers", "Sauvegarde complète du serveur"),
+    "Ripristino di un backup completo": ("Restore of a full backup", "Wiederherstellung eines vollständigen Backups",
+                                         "Restauration d'une sauvegarde complète"),
+    "{0} ha creato un backup completo del server ({1} utenti, {2} amministratori, {3} sonde).":
+        ("{0} created a full backup of the server ({1} users, {2} administrators, {3} probes).",
+         "{0} hat ein vollständiges Backup des Servers erstellt ({1} Benutzer, {2} Administratoren, {3} Sonden).",
+         "{0} a créé une sauvegarde complète du serveur ({1} utilisateurs, {2} administrateurs, {3} sondes)."),
+    "{0} ha ripristinato il backup del {1} (netmon {2}: {3} utenti, {4} amministratori, {5} sonde). I dati di prima sono sulla VM in data/prima-del-ripristino-….":
+        ("{0} restored the backup of {1} (netmon {2}: {3} users, {4} administrators, {5} probes). The previous data is on the VM in data/prima-del-ripristino-….",
+         "{0} hat das Backup vom {1} wiederhergestellt (netmon {2}: {3} Benutzer, {4} Administratoren, {5} Sonden). Die vorherigen Daten liegen auf der VM in data/prima-del-ripristino-….",
+         "{0} a restauré la sauvegarde du {1} (netmon {2} : {3} utilisateurs, {4} administrateurs, {5} sondes). Les données d'avant sont sur la VM dans data/prima-del-ripristino-…."),
+    "Backup incompleto o con file inattesi: non si può ripristinare.":
+        ("Incomplete backup or unexpected files: it cannot be restored.", "Unvollständiges Backup oder unerwartete Dateien: Wiederherstellung nicht möglich.",
+         "Sauvegarde incomplète ou fichiers inattendus : impossible de la restaurer."),
+    "Backup non trovato (caricato più di 2 ore fa?): caricalo di nuovo.":
+        ("Backup not found (uploaded more than 2 hours ago?): upload it again.", "Backup nicht gefunden (vor mehr als 2 Stunden hochgeladen?): lade es erneut hoch.",
+         "Sauvegarde introuvable (envoyée il y a plus de 2 heures ?) : envoie-la à nouveau."),
+    "C'è un trasferimento in corso: aspetta che finisca.": ("A transfer is in progress: wait for it to finish.",
+                                                            "Eine Übertragung läuft: warte, bis sie fertig ist.",
+                                                            "Un transfert est en cours : attends qu'il se termine."),
+    "Il backup viene da netmon {0}, più recente di quella installata ({1}): aggiorna prima il server.":
+        ("The backup comes from netmon {0}, newer than the installed one ({1}): update the server first.",
+         "Das Backup stammt von netmon {0}, neuer als die installierte Version ({1}): aktualisiere zuerst den Server.",
+         "La sauvegarde vient de netmon {0}, plus récente que celle installée ({1}) : mets d'abord le serveur à jour."),
+    "Il file non è un backup cifrato di netmon.": ("The file is not an encrypted netmon backup.", "Die Datei ist kein verschlüsseltes netmon-Backup.",
+                                                   "Le fichier n'est pas une sauvegarde chiffrée de netmon."),
+    "Il file non è un backup completo di netmon (per un singolo utente usa «Importa un utente»).":
+        ("The file is not a full netmon backup (for a single user use «Import a user»).",
+         "Die Datei ist kein vollständiges netmon-Backup (für einen einzelnen Benutzer verwende «Einen Benutzer importieren»).",
+         "Le fichier n'est pas une sauvegarde complète de netmon (pour un seul utilisateur utilise « Importer un utilisateur »)."),
+    "Il file non è un backup di netmon.": ("The file is not a netmon backup.", "Die Datei ist kein netmon-Backup.", "Le fichier n'est pas une sauvegarde de netmon."),
+    "Nel backup il database {0} non è di netmon.": ("In the backup, the database {0} is not a netmon database.",
+                                                    "Im Backup ist die Datenbank {0} keine netmon-Datenbank.",
+                                                    "Dans la sauvegarde, la base de données {0} n'est pas de netmon."),
+    "Nel backup il database {0} è danneggiato: non si può ripristinare.":
+        ("In the backup, the database {0} is damaged: it cannot be restored.", "Im Backup ist die Datenbank {0} beschädigt: Wiederherstellung nicht möglich.",
+         "Dans la sauvegarde, la base de données {0} est endommagée : impossible de la restaurer."),
+    "Nel backup il file {0} è danneggiato.": ("In the backup, the file {0} is damaged.", "Im Backup ist die Datei {0} beschädigt.",
+                                              "Dans la sauvegarde, le fichier {0} est endommagé."),
+    "Spazio su disco insufficiente per il ripristino.": ("Not enough disk space for the restore.", "Nicht genug Speicherplatz für die Wiederherstellung.",
+                                                         "Espace disque insuffisant pour la restauration."),
+    "Spazio su disco insufficiente per preparare il backup.": ("Not enough disk space to prepare the backup.",
+                                                               "Nicht genug Speicherplatz, um das Backup vorzubereiten.",
+                                                               "Espace disque insuffisant pour préparer la sauvegarde."),
+}
+for _it, _tr in _BACKUP.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
+del _BACKUP, _it, _tr, _lang, _text

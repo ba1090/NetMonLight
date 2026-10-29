@@ -8,7 +8,7 @@ Versione "light" di [NetMon](https://github.com/ba1090/NetMon): **una sola VM** 
   dispositivi, gli eventi e riceve i suoi avvisi (email, Telegram, ntfy).
 - **Pannello di amministrazione** (`https://netmonhome.net/admin`): amministratori, utenti, codici di accesso,
   limiti e piani, elenco e aggiornamento delle sonde, stato e manutenzione della VM, aggiornamento di
-  netmon con firma dell'autore e rollback.
+  netmon con firma dell'autore e rollback, backup completo del server (cifrato) e ripristino.
 - **Sonde** (per esempio un Raspberry Pi a casa di ogni utente): fanno ping ai dispositivi, leggono il
   FRITZ!Box e mandano i dati alla VM.
 

@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-083000"
+__version__ = "1.1.20261029-093000"
 VERSION = __version__
 import asyncio
 import base64
@@ -103,6 +103,35 @@ class viewer_tz:
 def local_time(ts, fmt="%d/%m %H:%M"):
     return datetime.fromtimestamp(ts, VIEW_TZ.get() or LOCAL_TZ).strftime(fmt)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Ripristino di un backup completo (pannello, Server › Backup e ripristino): il pannello prepara i
+# file in data/ripristino/ e riavvia il servizio; qui, prima di aprire qualunque database, i dati di
+# adesso vanno da parte in data/prima-del-ripristino-<data>/ (resta solo l'ultima) e quelli del backup
+# prendono il loro posto.
+RESTORE_DIR = DATA_DIR / "ripristino"
+BACKUP_FILES = ("auth.db", "events.db", "state.json", "speedtests.json", "scans.json", "inactive.json",
+                "privacy.html")
+
+
+def restore_apply():
+    if not (RESTORE_DIR / "PRONTO").is_file():
+        return
+    for old in DATA_DIR.glob("prima-del-ripristino-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    old = DATA_DIR / ("prima-del-ripristino-" + time.strftime("%Y%m%d-%H%M%S"))
+    old.mkdir(mode=0o700)
+    for name in BACKUP_FILES:
+        for f in (DATA_DIR / name, DATA_DIR / (name + "-wal"), DATA_DIR / (name + "-shm")):
+            if f.exists():
+                os.replace(f, old / f.name)
+    for name in BACKUP_FILES:
+        if (RESTORE_DIR / name).is_file():
+            os.replace(RESTORE_DIR / name, DATA_DIR / name)
+    shutil.rmtree(RESTORE_DIR, ignore_errors=True)
+    logging.getLogger("netmon").warning("Backup completo ripristinato; i dati di prima sono in %s", old)
+
+
+restore_apply()
 STATE_FILE = DATA_DIR / "state.json"
 DB_FILE = DATA_DIR / "events.db"
 
@@ -203,7 +232,7 @@ DEVICES_TOTAL_DEFAULT = 500
 MAX_BODY_BYTES = 10 * 1024 * 1024
 SMALL_BODY_BYTES = 256 * 1024     # tutte le altre richieste: moduli e impostazioni
 PROBE_BODY_PATHS = ("/api/report", "/api/backfill")
-BIG_BODY_PATHS = PROBE_BODY_PATHS + ("/api/admin/package", "/api/admin/transfer/upload")
+BIG_BODY_PATHS = PROBE_BODY_PATHS + ("/api/admin/package", "/api/admin/transfer/upload", "/api/admin/backup/upload")
 # La chiave del server crea sonde senza account. Chi la possiede potrebbe altrimenti registrarne
 # un numero illimitato e riempire il database, quindi il numero di sonde "orfane" e' limitato.
 # Superato il tetto l'avviso parte una volta sola: di norma significa che la chiave e' finita nelle
@@ -5300,6 +5329,264 @@ def drop_unused_invites(email):
         c.execute("DELETE FROM invites WHERE email = ? COLLATE NOCASE AND uses = 0", (normalize_email(email),))
 
 
+# ------------------------------------------------------------------ backup completo e ripristino
+# Server › Backup e ripristino: tutto il server (utenti, amministratori, sonde, storico, codici di
+# accesso, impostazioni del pannello) in un file cifrato con la password scelta da chi lo scarica, come
+# i file di trasferimento. Restano fuori il .env (chiave del server, bot Telegram) e le chiavi della
+# VM (firma degli aggiornamenti delle sonde e chiave di rilascio). Il ripristino prepara i file in
+# data/ripristino/ e riavvia il servizio: li mette al loro posto restore_apply(), all'avvio.
+BACKUP_FORMAT = "netmon-backup-completo"
+BACKUP_DBS = ("auth.db", "events.db")
+BACKUP_NEEDED_TABLES = {"auth.db": ("users", "admins", "probes"), "events.db": ("events",)}
+
+
+def restart_service():
+    """Chiude il processo: systemd lo fa ripartire (Restart=always in netmon-server.service)."""
+    os._exit(3)
+
+
+def backup_counts(auth_path):
+    with sqlite3.connect(f"file:{auth_path}?mode=ro", uri=True, factory=ClosingConnection) as c:
+        return {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("users", "admins", "probes")}
+
+
+def backup_build(out_zip):
+    """Scrive in out_zip il backup in chiaro (poi cifrato da chi chiama). Restituisce il manifesto."""
+    import zipfile
+    tmpdir = Path(tempfile.mkdtemp(prefix=".backup-", dir=DATA_DIR))
+    try:
+        files = {}
+        for name in BACKUP_DBS:                 # copia coerente anche mentre il servizio scrive
+            src = sqlite3.connect(DATA_DIR / name, timeout=30)
+            dst = sqlite3.connect(tmpdir / name)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
+            files[name] = tmpdir / name
+        for name in BACKUP_FILES:
+            if name not in files and (DATA_DIR / name).is_file():
+                shutil.copy2(DATA_DIR / name, tmpdir / name)
+                files[name] = tmpdir / name
+        counts = backup_counts(files["auth.db"])
+        man = {"format": BACKUP_FORMAT, "version": VERSION, "created": time.time(),
+               "server": urlsplit(os.getenv("PUBLIC_URL", "")).hostname or "", "counts": counts,
+               "files": {n: f.stat().st_size for n, f in files.items()}}
+        with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", json.dumps(man, indent=1))
+            for name, f in files.items():
+                zf.write(f, name)
+        return man
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def backup_read(path):
+    """Manifesto di un backup in chiaro, dopo averne controllato contenuto e versione."""
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(path)
+    except (zipfile.BadZipFile, OSError):
+        raise HTTPException(status_code=422, detail="Il file non è un backup di netmon.")
+    with zf:
+        names = set(zf.namelist())
+        try:
+            man = json.loads(zf.read("manifest.json"))
+        except (KeyError, ValueError):
+            raise HTTPException(status_code=422, detail="Il file non è un backup completo di netmon "
+                                                        "(per un singolo utente usa «Importa un utente»).")
+        if not isinstance(man, dict) or man.get("format") != BACKUP_FORMAT:
+            raise HTTPException(status_code=422, detail="Il file non è un backup completo di netmon "
+                                                        "(per un singolo utente usa «Importa un utente»).")
+        extra = names - {"manifest.json", *BACKUP_FILES}
+        if extra or not set(BACKUP_DBS) <= names:
+            raise HTTPException(status_code=422, detail="Backup incompleto o con file inattesi: non si può ripristinare.")
+        if pkgcheck.version_key(str(man.get("version"))) > pkgcheck.version_key(VERSION):
+            raise HTTPException(status_code=422, detail=f"Il backup viene da netmon {man.get('version')}, più recente di "
+                                                        f"quella installata ({VERSION}): aggiorna prima il server.")
+        man["size"] = sum(i.file_size for i in zf.infolist())
+    return man
+
+
+def backup_stage(path):
+    """Estrae il backup in data/ripristino/, controlla i database e lo segna pronto per l'avvio."""
+    import zipfile
+    man = backup_read(path)
+    if shutil.disk_usage(DATA_DIR).free < man["size"] + MIN_FREE_MB * 1024 * 1024:
+        raise HTTPException(status_code=507, detail="Spazio su disco insufficiente per il ripristino.")
+    shutil.rmtree(RESTORE_DIR, ignore_errors=True)
+    RESTORE_DIR.mkdir(mode=0o700)
+    ok = False
+    try:
+        with zipfile.ZipFile(path) as zf:
+            for name in BACKUP_FILES:
+                if name in zf.namelist():
+                    with zf.open(name) as src, open(RESTORE_DIR / name, "wb") as dst:
+                        shutil.copyfileobj(src, dst, 1024 * 1024)
+        for name, tables in BACKUP_NEEDED_TABLES.items():
+            try:
+                with sqlite3.connect(f"file:{RESTORE_DIR / name}?mode=ro", uri=True, factory=ClosingConnection) as c:
+                    if c.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                        raise sqlite3.DatabaseError("integrity_check")
+                    have = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            except sqlite3.DatabaseError:
+                raise HTTPException(status_code=422, detail=f"Nel backup il database {name} è danneggiato: non si può ripristinare.")
+            if not set(tables) <= have:
+                raise HTTPException(status_code=422, detail=f"Nel backup il database {name} non è di netmon.")
+        for name in ("state.json", "speedtests.json", "scans.json", "inactive.json"):
+            f = RESTORE_DIR / name
+            if f.exists():
+                try:
+                    json.loads(f.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    raise HTTPException(status_code=422, detail=f"Nel backup il file {name} è danneggiato.")
+        (RESTORE_DIR / "PRONTO").write_text(json.dumps(man))
+        ok = True
+    finally:
+        if not ok:
+            shutil.rmtree(RESTORE_DIR, ignore_errors=True)
+    return man
+
+
+class BackupExport(BaseModel):
+    password: str = Field(default="", max_length=256)
+    file_password: str = Field(default="", max_length=256)
+
+
+@app.post("/api/admin/backup/export")
+async def api_backup_export(b: BackupExport, request: Request, adm: dict = Depends(admin_user)):
+    """Prepara il backup completo cifrato; si scarica con /api/admin/transfer/download."""
+    await check_admin_pw(adm, b.password, request)
+    if len(b.file_password) < FILE_PW_MIN:
+        raise HTTPException(status_code=422, detail=f"La password del file deve avere almeno {FILE_PW_MIN} caratteri.")
+    need = sum((DATA_DIR / n).stat().st_size for n in BACKUP_FILES if (DATA_DIR / n).is_file())
+    if shutil.disk_usage(DATA_DIR).free < 2 * need + MIN_FREE_MB * 1024 * 1024:
+        raise HTTPException(status_code=507, detail="Spazio su disco insufficiente per preparare il backup.")
+    TRANSFER_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    name = secrets.token_hex(8)
+    plain, path = TRANSFER_DIR / f"backup-{name}.zip", TRANSFER_DIR / f"backup-{name}.netmon"
+    host = re.sub(r"[^A-Za-z0-9.-]+", "_", urlsplit(public_base(request)).hostname or "server")
+    tid = transfer_new("export", adm, file=str(path),
+                       name=f"netmon-backup-{host}-{datetime.now(LOCAL_TZ).strftime('%Y%m%d-%H%M')}.netmon")
+
+    async def work():
+        async with lock:
+            await asyncio.to_thread(flush_state)      # lo stato delle sonde di adesso, non quello di qualche secondo fa
+        try:
+            man = await asyncio.to_thread(backup_build, plain)
+            await asyncio.to_thread(xfer_encrypt, plain, path, b.file_password)
+        finally:
+            plain.unlink(missing_ok=True)             # il backup in chiaro non resta sul disco
+        c = man["counts"]
+        log.warning("Backup completo scaricato da %s (%d utenti, %d amministratori, %d sonde)", adm["login"],
+                    c["users"], c["admins"], c["probes"])
+        await asyncio.to_thread(admin_notice, "[INFO] Backup completo del server",
+                                f"{adm.get('name') or adm['login']} ha creato un backup completo del server "
+                                f"({c['users']} utenti, {c['admins']} amministratori, {c['probes']} sonde).")
+        return {**c, "size": path.stat().st_size}
+    asyncio.create_task(transfer_run(tid, "export", work))
+    return {"ok": True, "id": tid}
+
+
+@app.post("/api/admin/backup/upload")
+async def api_backup_upload(request: Request, id: str = Query(max_length=64), part: int = Query(ge=0, lt=600),
+                            parts: int = Query(ge=1, le=600), adm: dict = Depends(admin_user)):
+    """Un pezzo del file di backup da ripristinare (corpo application/octet-stream)."""
+    if not _TRANSFER_ID.fullmatch(id):
+        raise HTTPException(status_code=422, detail="Identificativo non valido.")
+    data = await request.body()
+    if not data or len(data) > TRANSFER_PART + 1024:
+        raise HTTPException(status_code=413, detail="Pezzo vuoto o troppo grande.")
+    if parts * TRANSFER_PART > TRANSFER_MAX:
+        raise HTTPException(status_code=413, detail="File troppo grande.")
+    folder = TRANSFER_DIR / f"bk-{id}"
+
+    def store():
+        transfer_clean()
+        TRANSFER_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        folder.mkdir(mode=0o700, exist_ok=True)
+        (folder / f"{part:04d}").write_bytes(data)
+        if part != parts - 1:
+            return {"ok": True, "received": part + 1}
+        if any(not (folder / f"{i:04d}").exists() for i in range(parts)):
+            raise HTTPException(status_code=422, detail="Caricamento incompleto: riprova.")
+        whole = folder / "upload"
+        with open(whole, "wb") as out:
+            for i in range(parts):
+                with open(folder / f"{i:04d}", "rb") as f:
+                    shutil.copyfileobj(f, out, 1024 * 1024)
+                (folder / f"{i:04d}").unlink()
+        if not xfer_encrypted(whole):
+            shutil.rmtree(folder, ignore_errors=True)
+            raise HTTPException(status_code=422, detail="Il file non è un backup cifrato di netmon.")
+        return {"ok": True, "encrypted": True}
+    return await asyncio.to_thread(store)
+
+
+class BackupOpen(BaseModel):
+    id: str = Field(max_length=64)
+    file_password: str = Field(max_length=256)
+
+
+@app.post("/api/admin/backup/open")
+async def api_backup_open(b: BackupOpen, adm: dict = Depends(admin_user)):
+    """Apre il backup caricato con la sua password e dice cosa contiene (niente viene ancora toccato)."""
+    if not _TRANSFER_ID.fullmatch(b.id):
+        raise HTTPException(status_code=422, detail="Identificativo non valido.")
+    folder = TRANSFER_DIR / f"bk-{b.id}"
+    if not (folder / "upload").exists() and not (folder / "zip").exists():
+        raise HTTPException(status_code=404, detail="File non trovato (caricato più di 2 ore fa?): caricalo di nuovo.")
+
+    def open_file():
+        if not (folder / "zip").exists():
+            tmp = folder / "zip.tmp"
+            try:
+                xfer_decrypt(folder / "upload", tmp, b.file_password)
+            except ValueError as exc:
+                log.warning("Backup non aperto da %s: password sbagliata o file danneggiato", adm["login"])
+                raise HTTPException(status_code=422, detail=str(exc))
+            tmp.replace(folder / "zip")
+            (folder / "upload").unlink(missing_ok=True)
+        man = backup_read(folder / "zip")
+        return {"ok": True, "version": man.get("version"), "created": fmt_when(man.get("created")),
+                "server": man.get("server") or "", "counts": man.get("counts") or {}, "size": man["size"],
+                "current": backup_counts(DATA_DIR / "auth.db")}
+    return await asyncio.to_thread(open_file)
+
+
+class BackupRestore(BaseModel):
+    id: str = Field(max_length=64)
+    password: str = Field(default="", max_length=256)
+    confirm: str = Field(default="", max_length=20)
+
+
+@app.post("/api/admin/backup/restore")
+async def api_backup_restore(b: BackupRestore, request: Request, adm: dict = Depends(admin_user)):
+    """Ripristina il backup aperto: prepara i file e riavvia il servizio. Tutti i dati di adesso vengono
+    sostituiti (restano da parte in data/prima-del-ripristino-…)."""
+    await check_admin_pw(adm, b.password, request)
+    if b.confirm != "RIPRISTINA":
+        raise HTTPException(status_code=422, detail="Scrivi RIPRISTINA per confermare.")
+    whole = TRANSFER_DIR / f"bk-{b.id}" / "zip"
+    if not _TRANSFER_ID.fullmatch(b.id) or not whole.exists():
+        raise HTTPException(status_code=404, detail="Backup non trovato (caricato più di 2 ore fa?): caricalo di nuovo.")
+    if any(t["state"] == "running" for t in _transfers.values()):
+        raise HTTPException(status_code=409, detail="C'è un trasferimento in corso: aspetta che finisca.")
+    man = await asyncio.to_thread(backup_stage, whole)
+    await asyncio.to_thread(shutil.rmtree, whole.parent, True)
+    c = man.get("counts") or {}
+    log.warning("Ripristino del backup del %s (netmon %s) avviato da %s: il servizio si riavvia",
+                fmt_when(man.get("created")), man.get("version"), adm["login"])
+    await asyncio.to_thread(admin_notice, "[INFO] Ripristino di un backup completo",
+                            f"{adm.get('name') or adm['login']} ha ripristinato il backup del {fmt_when(man.get('created'))} "
+                            f"(netmon {man.get('version')}: {c.get('users', '?')} utenti, {c.get('admins', '?')} "
+                            f"amministratori, {c.get('probes', '?')} sonde). I dati di prima sono sulla VM in "
+                            "data/prima-del-ripristino-….")
+    asyncio.get_running_loop().call_later(1.5, restart_service)
+    return {"ok": True, "restart": True}
+
+
 # ------------------------------------------------------------------ aggiornamenti programmati (VM e sonde)
 # Un amministratore programma un aggiornamento per una data e un'ora (o per subito). Il watchdog lo
 # avvia all'ora stabilita: sulla VM con lo stesso script del pulsante "Aggiorna sistema" (oppure,
@@ -8515,7 +8802,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-083000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-093000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -15729,6 +16016,55 @@ tr.is-blocked td{color:var(--muted)}
   </section>
 
   <section>
+    <div class="probe-head"><h2>Backup e ripristino</h2></div>
+    <div class="admin-body">
+      <fieldset>
+        <legend>Backup completo</legend>
+        <p class="hint">Tutto il server in un file cifrato: utenti, amministratori, sonde, storico, codici di accesso e
+          impostazioni del pannello (invio email compreso). Senza la password del file non si apre: non la salva
+          nessuno, né il server né il file. Restano fuori il file <code>.env</code> (chiave del server, bot Telegram) e
+          le chiavi della VM.</p>
+        <div class="cols">
+          <div><label class="field" for="bk-fpw">Password del file (almeno 12 caratteri)</label>
+            <input id="bk-fpw" type="text" class="mono" autocomplete="off" spellcheck="false"></div>
+          <div><label class="field" for="bk-fpw2">Ripeti la password del file</label>
+            <input id="bk-fpw2" type="password" autocomplete="off"></div>
+        </div>
+        <div class="cols">
+          <div><label class="field" for="bk-pass">La tua password di amministratore</label>
+            <input id="bk-pass" type="password" autocomplete="current-password"></div>
+          <div class="ua-btns"><button type="button" class="primary" id="bk-go">Crea e scarica il backup</button></div>
+        </div>
+        <p class="hint" id="bk-msg" role="status"></p>
+      </fieldset>
+      <fieldset>
+        <legend>Ripristino</legend>
+        <p class="hint">Rimette il server com'era nel backup: <strong>sostituisce tutti</strong> gli utenti, gli
+          amministratori, le sonde e lo storico di adesso. I dati di adesso restano da parte sulla VM, nella cartella
+          <code>data/prima-del-ripristino-…</code>. Il server si riavvia; dopo si accede con un amministratore del backup.</p>
+        <div class="cols">
+          <div><label class="field" for="rs-file">File di backup (.netmon)</label>
+            <input id="rs-file" type="file" accept=".netmon"></div>
+          <div><label class="field" for="rs-fpw">Password del file</label>
+            <input id="rs-fpw" type="password" autocomplete="off"></div>
+          <div class="ua-btns"><button type="button" id="rs-up">Carica e controlla</button></div>
+        </div>
+        <p class="hint" id="rs-msg" role="status"></p>
+        <div id="rs-confirm" hidden>
+          <ul class="pk-checks" id="rs-info"></ul>
+          <div class="cols">
+            <div><label class="field" for="rs-word">Scrivi RIPRISTINA</label>
+              <input id="rs-word" autocomplete="off" spellcheck="false"></div>
+            <div><label class="field" for="rs-pass">La tua password di amministratore</label>
+              <input id="rs-pass" type="password" autocomplete="current-password"></div>
+            <div class="ua-btns"><button type="button" class="danger" id="rs-go">Ripristina e riavvia</button></div>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+  </section>
+
+  <section>
     <div class="probe-head"><h2>Invio email</h2><span class="txt" id="em-now"></span></div>
     <div class="admin-body">
       <fieldset>
@@ -17113,6 +17449,77 @@ $("#rt-save").onclick = async () => {
         (r.deleted ? ` Eliminate ${r.deleted.toLocaleString(LOC)} righe più vecchie.` : ""));
   } catch (e) { say("#rt-msg", e.message, true); }
   finally { $("#rt-save").disabled = false; }
+};
+
+// ---- backup completo del server e ripristino ----
+$("#bk-go").onclick = async () => {
+  const fpw = $("#bk-fpw").value, password = $("#bk-pass").value;
+  if (fpw.length < 12) return say("#bk-msg", "La password del file deve avere almeno 12 caratteri.", true);
+  if (fpw !== $("#bk-fpw2").value) return say("#bk-msg", "Le due password del file non coincidono.", true);
+  if (!password) return say("#bk-msg", "Inserisci la tua password di amministratore.", true);
+  $("#bk-go").disabled = true; say("#bk-msg", "Preparazione del backup…");
+  try {
+    const job = await api("/api/admin/backup/export", { password, file_password: fpw });
+    const res = await transferWait(job.id);
+    await transferDownload(job.id);
+    say("#bk-msg", `Backup scaricato (${fmtBytes(res.size)}): ${res.users} utenti, ${res.admins} amministratori, `
+      + `${res.probes} sonde. Conservalo insieme alla sua password, ma in due posti diversi.`);
+    $("#bk-fpw").value = $("#bk-fpw2").value = "";
+  } catch (e) { say("#bk-msg", e.message, true); }
+  finally { $("#bk-go").disabled = false; $("#bk-pass").value = ""; }
+};
+let RS = null;                           // backup caricato: con un'altra password si riprova senza ricaricarlo
+$("#rs-file").onchange = () => { RS = null; $("#rs-confirm").hidden = true; say("#rs-msg", ""); };
+$("#rs-up").onclick = async () => {
+  const f = $("#rs-file").files[0], fpw = $("#rs-fpw").value;
+  if (!f) return say("#rs-msg", "Scegli il file di backup.", true);
+  if (!fpw) return say("#rs-msg", "Scrivi la password del file.", true);
+  $("#rs-up").disabled = true; $("#rs-confirm").hidden = true;
+  try {
+    let id = RS && RS.file === f ? RS.id : null;
+    if (!id) {
+      const rnd = new Uint8Array(18); crypto.getRandomValues(rnd);
+      id = btoa(String.fromCharCode(...rnd)).replace(/\+/g, "-").replace(/\//g, "_");
+      const PART = 8 * 1024 * 1024, parts = Math.max(1, Math.ceil(f.size / PART));
+      for (let i = 0; i < parts; i++) {
+        say("#rs-msg", `Caricamento… ${Math.round(i * 100 / parts)}%`);
+        const r = await fetch(`/api/admin/backup/upload?id=${id}&part=${i}&parts=${parts}`,
+          { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f.slice(i * PART, (i + 1) * PART) });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(typeof res.detail === "string" ? res.detail : "HTTP " + r.status);
+      }
+      RS = { id, file: f };
+    }
+    say("#rs-msg", "Apro il file con la sua password…");
+    const p = await api("/api/admin/backup/open", { id, file_password: fpw });
+    const c = p.counts || {}, now = p.current || {}, ul = $("#rs-info"); ul.innerHTML = "";
+    ul.appendChild(el("li", "head", `Backup del ${p.created || "?"} · netmon ${p.version || "?"}` + (p.server ? ` · ${p.server}` : "")));
+    ul.appendChild(el("li", "ok", `Nel backup: ${c.users} utenti, ${c.admins} amministratori, ${c.probes} sonde (${fmtBytes(p.size)})`));
+    ul.appendChild(el("li", "warn", `Adesso sul server: ${now.users} utenti, ${now.admins} amministratori, ${now.probes} sonde: vengono sostituiti`));
+    say("#rs-msg", "Controlla cosa contiene il backup, poi conferma.");
+    $("#rs-word").value = ""; $("#rs-confirm").hidden = false;
+  } catch (e) { say("#rs-msg", e.message, true); }
+  finally { $("#rs-up").disabled = false; }
+};
+$("#rs-go").onclick = async () => {
+  if (!RS) return;
+  if ($("#rs-word").value.trim() !== "RIPRISTINA") return say("#rs-msg", "Scrivi RIPRISTINA per confermare.", true);
+  const password = $("#rs-pass").value;
+  if (!password) return say("#rs-msg", "Inserisci la tua password di amministratore.", true);
+  if (!confirm("Sostituire tutti i dati del server con quelli del backup?\n\nIl server si riavvia: dopo accedi con un amministratore del backup.")) return;
+  $("#rs-go").disabled = true;
+  try {
+    await api("/api/admin/backup/restore", { id: RS.id, password, confirm: "RIPRISTINA" });
+    say("#rs-msg", "Ripristino avviato: il server si riavvia…");
+    await new Promise(r => setTimeout(r, 6000));
+    for (const t0 = Date.now(); Date.now() - t0 < 120000;) {
+      try { if ((await fetch("/health", { cache: "no-store" })).ok) break; } catch { /* in riavvio */ }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    alert("Ripristino completato. Accedi con un amministratore del backup.");
+    location.reload();
+  } catch (e) { say("#rs-msg", e.message, true); $("#rs-go").disabled = false; }
+  finally { $("#rs-pass").value = ""; }
 };
 
 // ---- invio email: l'account da cui partono le email ----
