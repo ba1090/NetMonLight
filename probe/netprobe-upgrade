@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261029-190000
+# netmon versione 1.1.20261029-200000
 # Aggiornamento dei pacchetti della sonda, avviato da netmon (pagina locale o server).
 # Installazione: sudo install -m 755 -o root -g root netprobe-upgrade /usr/local/sbin/
 # Gira come root in un'unità systemd separata; scrive log e stato in /var/lib/netprobe-sys,

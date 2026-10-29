@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-190000*
+*Versione di netmon: 1.1.20261029-200000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,

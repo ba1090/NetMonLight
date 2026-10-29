@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-190000"
+__version__ = "1.1.20261029-200000"
 VERSION = __version__
 import asyncio
 import base64
@@ -9229,7 +9229,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-190000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-200000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -12299,8 +12299,17 @@ function netdevSection(p) {
 
 // ---- Dashboard: riepilogo, grafici dei ping e uso della linea (FRITZ!Box). Cosa mostrare
 // si sceglie dal pulsante «Visualizza», e la scelta resta in questo browser ----
-let dashData = null, dashLoaded = 0, dashErr = "";
+let dashData = null, dashLoaded = 0, dashErr = "", dashBusy = false, dashHealAt = 0;
 const DASH_RANGE = "24h", DASH_TTL = 5 * 60000;
+// Richiesta con una scadenza: una connessione rimasta appesa (computer in stop, Wi-Fi cambiato) non
+// deve bloccare per sempre gli aggiornamenti che aspettano la sua risposta.
+const FETCH_TIMEOUT = 20000;
+async function fetchT(url, opts = {}, ms = FETCH_TIMEOUT) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ctl.signal }); }
+  catch (e) { throw e.name === "AbortError" ? new Error("nessuna risposta in " + Math.round(ms / 1000) + " s") : e; }
+  finally { clearTimeout(t); }
+}
 
 // Cosa mostra la Dashboard: salvato nell'account (uguale su ogni dispositivo), come le
 // preferenze di visualizzazione. Il browser ne tiene una copia per mostrarla subito all'apertura.
@@ -12411,17 +12420,23 @@ function buildDashMenu() {
 async function loadDash(force = false) {
   if (!currentUser || !$("#login").hidden) return;
   if (!force && dashData && Date.now() - dashLoaded < DASH_TTL) { renderDash(); return; }
+  if (dashBusy) return;                  // una richiesta alla volta (con la sua scadenza)
+  dashBusy = true;
   try {
-    const r = await fetch("/api/dashboard?range=" + DASH_RANGE, { cache: "no-store" });
+    const r = await fetchT("/api/dashboard?range=" + DASH_RANGE, { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     dashData = await r.json();
     dashLoaded = Date.now(); dashErr = "";
   } catch (e) {
     // in cima alla pagina, non in fondo: senza dati i grafici restano vuoti e bisogna sapere perché
     dashErr = "Grafici non disponibili (" + e.message + "): riprovo al prossimo aggiornamento.";
+  } finally {
+    dashBusy = false;
   }
   renderDash();
 }
+// Dati dei grafici da rifare subito (risveglio del computer, rete tornata): si ricarica tutto
+function dashStale() { dashLoaded = 0; avail.at = 0; }
 
 function dashKey(probe, dev) { return probe + "\u0001" + dev; }
 
@@ -13025,6 +13040,11 @@ function renderDash() {
       card.appendChild(svg);
       if (!series[key] && d.state !== "off") card.appendChild(el("div", "spark-empty", !dashData ? "grafico non disponibile"
         : "nessuna misura salvata nelle ultime 24 ore"));
+      // risponde adesso ma non ha misure nei dati dei grafici: dati vecchi o incompleti, si richiedono
+      // (al massimo una volta al minuto) invece di aspettare la scadenza dei 5 minuti
+      if (dashData && !series[key] && d.rtt != null && Date.now() - dashHealAt > 60000 && Date.now() - dashLoaded > 30000) {
+        dashHealAt = Date.now(); setTimeout(() => loadDash(true));
+      }
       card.onclick = () => { if (!dashOrdering) openHistory(d.name, p.name); };
       card.title = "Apri lo storico dei ping di " + (d.name || "?");
       addDashMove(card, head, d.name || "?");
@@ -13062,9 +13082,10 @@ function availDevs(prefs) {
 function availFetch(key, url) {
   if (avail.busy || (avail.key === key && Date.now() - avail.at < DASH_TTL)) return;
   avail.busy = true;
-  fetch(url, { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject(new Error("errore " + r.status)))
+  fetchT(url, { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject(new Error("errore " + r.status)))
     .then(j => { avail = { key, data: j, at: Date.now(), busy: false, err: "" }; })
-    .catch(e => { avail = { key, data: null, at: Date.now(), busy: false, err: e.message || String(e) }; })
+    // dopo un errore si riprova tra 30 secondi, non alla scadenza dei 5 minuti
+    .catch(e => { avail = { key, data: null, at: Date.now() - DASH_TTL + 30000, busy: false, err: e.message || String(e) }; })
     .finally(() => { if (!dashOrdering) renderDash(); });
 }
 // Etichette sotto le caselle della Disponibilità: su uno schermo stretto quelle vicine si
@@ -13717,12 +13738,15 @@ function tickFoot() {
     + (paused ? "aggiornamento in pausa" : `si aggiorna tra ${left} s`);
 }
 
+let refreshBusy = false, refreshAgain = false;
 async function refresh(force = false) {
   if (!currentUser || !$("#login").hidden) return;
   if (document.hidden) return;              // scheda non visibile: niente richieste al server
   if (!force && (reorder || sectionsMode || dashOrdering || evSelecting || document.querySelector("dialog[open]"))) return;
+  if (refreshBusy) { refreshAgain = refreshAgain === "force" || force ? "force" : true; return; }   // la precedente non ha risposto: si rifà subito dopo
+  refreshBusy = true;
   try {
-    const r = await fetch(`/api/status?events=${evSize}&events_from=${evFrom}`
+    const r = await fetchT(`/api/status?events=${evSize}&events_from=${evFrom}`
       + `&events_q=${encodeURIComponent(evQ)}&events_tags=${encodeURIComponent([...evTags].join(","))}`, { cache: "no-store" });
     if (r.status === 401) {
       checkAuth("La sessione è scaduta: accedi di nuovo.");
@@ -13755,8 +13779,12 @@ async function refresh(force = false) {
   } catch (e) {
     footState = { ...footState, error: "Server non raggiungibile (" + e.message + ").",
                   nextAt: Date.now() + PERIOD };
+  } finally {
+    refreshBusy = false;
   }
   tickFoot();
+  // chiesto mentre l'altro era in corso (per esempio dopo un salvataggio): i dati appena cambiati
+  if (refreshAgain) { const f = refreshAgain === "force"; refreshAgain = false; setTimeout(() => refresh(f)); }
 }
 
 async function saveOrder() {
@@ -15801,8 +15829,16 @@ showPage(startPage, false, startSub);
 
 checkAuth();
 timer = setInterval(refresh, PERIOD);
-// tornando alla scheda (o riaprendo il telefono) i dati si aggiornano subito
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+// tornando alla scheda (o riaprendo il telefono) i dati si aggiornano subito; dopo una pausa lunga
+// (computer in stop) o con la rete tornata si rifanno anche i grafici, che potrebbero essere fermi
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 60000) dashStale();
+  refresh();
+});
+window.addEventListener("online", () => { dashStale(); refresh(); });
+window.addEventListener("pageshow", e => { if (e.persisted) { dashStale(); refresh(); } });
 setInterval(tickFoot, 1000);
 </script>
 </body>

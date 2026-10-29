@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261029-190000
+# netmon versione 1.1.20261029-200000
 # Chiave di firma degli aggiornamenti delle sonde nel backup completo del pannello.
 # Installazione: sudo install -m 755 -o root -g root netmon-chiave-sonde /usr/local/sbin/
 # Uso (il servizio netmon, con sudo, solo questi due comandi: vedi sudoers-netmon-vm):

@@ -7,8 +7,15 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-190000 · 10 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-200000 · 11 versioni) — NetMon Light
 
+- **Grafici della Dashboard che si fermavano** finché non si ricaricava la pagina: una richiesta rimasta
+  appesa (computer in stop, rete cambiata) bloccava la Disponibilità, e dati dei grafici vecchi o incompleti
+  restavano fino alla scadenza (le schede dicevano «nessuna misura salvata» con il dispositivo che rispondeva).
+  Ora ogni richiesta della pagina ha una scadenza di 20 secondi, i grafici non partono due volte insieme,
+  dopo un errore si riprova in 30 secondi, una scheda senza misure di un dispositivo che risponde fa
+  richiedere subito i dati, e al risveglio del computer o al ritorno della rete si ricarica tutto.
+  *Pagina utente.*
 - **Grafico del ping: disservizi distinti dai ping persi**. I disservizi notificati sono fasce rosse a tutta
   altezza dal primo controllo fallito al ritorno, ricostruite dagli avvisi registrati; i ping persi senza
   avviso sono tacche gialle sull'asse, alte quanto la parte di controlli falliti. In alto i riquadri

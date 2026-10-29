@@ -1,5 +1,5 @@
 #!/bin/bash
-# netmon versione 1.1.20261029-190000
+# netmon versione 1.1.20261029-200000
 # Aggiornamento di netmon sulla VM da un pacchetto netmon.zip caricato dal pannello /admin.
 # Installazione: sudo install -m 755 -o root -g root netmon-vm-selfupdate /usr/local/sbin/
 # Gira come root in un'unità systemd separata, avviata dal servizio (utente netmon) dopo che un

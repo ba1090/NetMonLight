@@ -11,7 +11,7 @@ testo italiano. Un testo con parti variabili ha i segnaposto {0}, {1}…: «{0} 
 
 Per trovare i testi nuovi ancora senza traduzione: python3 tools/i18n-estrai.py server --mancanti
 """
-__version__ = "1.1.20261029-190000"
+__version__ = "1.1.20261029-200000"
 import json
 import re
 
@@ -5012,6 +5012,14 @@ for _it, _tr in {
     "{0} controlli falliti": ("{0} failed checks", "{0} fehlgeschlagene Prüfungen", "{0} contrôles échoués"),
     "{0} min": ("{0} min", "{0} Min.", "{0} min"),
     "{0} h {1} min": ("{0} h {1} min", "{0} Std. {1} Min.", "{0} h {1} min"),
+}.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        TRANSLATIONS[_lang].setdefault(_it, _text)
+del _it, _tr, _lang, _text
+
+# Richieste della pagina con una scadenza
+for _it, _tr in {
+    "nessuna risposta in {0} s": ("no response in {0} s", "keine Antwort in {0} s", "aucune réponse en {0} s"),
 }.items():
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         TRANSLATIONS[_lang].setdefault(_it, _text)
