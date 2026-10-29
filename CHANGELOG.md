@@ -7,8 +7,15 @@ Una voce per giorno, dalla più recente, con lo stato a fine giornata: ciò che 
 cambiato o tolto nello stesso giorno è riportato una volta sola. Tra parentesi l'ultima versione del
 giorno e quante ne sono uscite.
 
-## 29 ottobre 2026 (1.1.20261029-160000 · 7 versioni) — NetMon Light
+## 29 ottobre 2026 (1.1.20261029-170000 · 8 versioni) — NetMon Light
 
+- **Chiave di firma delle sonde nel backup completo**: il backup del pannello contiene anche la chiave con cui la
+  VM firma gli aggiornamenti delle sonde, e il ripristino la rimette (con i programmi delle sonde rifirmati).
+  Spostando il server su una VM nuova con *Backup e ripristino*, le sonde continuano ad aggiornarsi dal
+  pannello: prima andavano aggiornate una per una in SSH. La chiave resta di root: la legge e la scrive solo il
+  nuovo `netmon-chiave-sonde` (due comandi concessi al servizio con sudo). Ogni backup avvisa gli
+  amministratori con l'impronta della chiave, e le operazioni restano nel registro della VM. Chi ha il file e
+  la sua password può firmare aggiornamenti per le sonde: va custodito come una password. *Server, pannello.*
 - **Indirizzo completo della sonda** nella procedura *Collega la tua prima sonda* (passo *Installa*, con
   *Copia*) e nella mail d'invito, oltre al dominio: `https://dominio/api/report`, da scrivere così com'è nella
   pagina locale della sonda, in `config.yaml` o in Home Assistant. *Pagina utente, email.*

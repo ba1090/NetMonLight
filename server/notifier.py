@@ -7,7 +7,7 @@
 - ntfy: priorità 5 (massima, suona anche in "non disturbare" se configurato) per i critici; il
   topic lo indica ogni utente.
 """
-__version__ = "1.1.20261029-160000"
+__version__ = "1.1.20261029-170000"
 import html
 import http.client
 import ipaddress

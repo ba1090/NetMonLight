@@ -1,0 +1,66 @@
+#!/bin/bash
+# netmon versione 1.1.20261029-170000
+# Chiave di firma degli aggiornamenti delle sonde nel backup completo del pannello.
+# Installazione: sudo install -m 755 -o root -g root netmon-chiave-sonde /usr/local/sbin/
+# Uso (il servizio netmon, con sudo, solo questi due comandi: vedi sudoers-netmon-vm):
+#   netmon-chiave-sonde esporta    stampa la chiave privata (per il backup completo, che la cifra)
+#   netmon-chiave-sonde importa    legge una chiave privata da stdin, la installa al posto di quella
+#                                  attuale (che resta in /etc/netmon come copia) e rifirma i programmi
+#                                  delle sonde con netmon-firma-sonde
+#
+# Con la stessa chiave della VM di prima, le sonde spostate su una VM nuova continuano ad accettare gli
+# aggiornamenti dal pannello. Il prezzo: chi controlla il pannello (o il servizio web) può leggere la
+# chiave scaricando un backup. Ogni esportazione e importazione finisce nel registro di sistema
+# (journalctl -t netmon-chiave-sonde) e il pannello avvisa gli amministratori.
+# Importare una chiave diversa da quella che le sonde conoscono non apre nulla: le sonde la rifiutano.
+set -euo pipefail
+umask 077
+KEYDIR=/etc/netmon
+KEY=$KEYDIR/update-signing.key
+DIST=/opt/netmon/probe-dist
+MAX=4096
+
+[ "$(id -u)" -eq 0 ] || { echo "Lancia il comando con sudo." >&2; exit 1; }
+command -v openssl >/dev/null || { echo "Manca openssl." >&2; exit 1; }
+log() { logger -t netmon-chiave-sonde -- "$*" 2>/dev/null || true; }
+fingerprint() { openssl pkey -in "$1" -pubout -outform DER 2>/dev/null | sha256sum | cut -c1-16 | sed 's/..../& /g;s/ $//'; }
+
+case "${1:-}" in
+  esporta)
+    [ -s "$KEY" ] && [ ! -L "$KEY" ] || { echo "Nessuna chiave di firma delle sonde su questa VM." >&2; exit 2; }
+    log "chiave di firma delle sonde esportata per un backup completo (impronta $(fingerprint "$KEY"))"
+    cat "$KEY"
+    ;;
+  importa)
+    TMP=$(mktemp -d)
+    trap 'rm -rf "$TMP"' EXIT
+    head -c $((MAX + 1)) > "$TMP/key"
+    [ "$(stat -c %s "$TMP/key")" -le "$MAX" ] || { echo "File troppo grande per una chiave." >&2; exit 3; }
+    # solo una chiave privata Ed25519 valida, riscritta da openssl (niente altro testo nel file)
+    openssl pkey -in "$TMP/key" -out "$TMP/clean" 2>/dev/null || { echo "Non è una chiave privata valida." >&2; exit 3; }
+    openssl pkey -in "$TMP/clean" -noout -text 2>/dev/null | head -n1 | grep -q 'ED25519 Private-Key' \
+      || { echo "La chiave non è di tipo Ed25519." >&2; exit 3; }
+    NEW=$(fingerprint "$TMP/clean")
+    install -d -m 700 -o root -g root "$KEYDIR"
+    if [ -s "$KEY" ] && cmp -s <(openssl pkey -in "$KEY" 2>/dev/null) "$TMP/clean"; then
+      echo "Chiave già in uso (impronta $NEW)."
+      exit 0
+    fi
+    if [ -s "$KEY" ]; then
+      OLD=$(fingerprint "$KEY")
+      cp -p "$KEY" "$KEY.prima-$(date +%Y%m%d-%H%M%S)"
+    else
+      OLD="nessuna"
+    fi
+    install -m 600 -o root -g root "$TMP/clean" "$KEY.tmp" && mv -f "$KEY.tmp" "$KEY"
+    log "chiave di firma delle sonde importata da un backup completo: $OLD → $NEW"
+    if [ -d "$DIST" ] && [ -x /usr/local/sbin/netmon-firma-sonde ]; then
+      /usr/local/sbin/netmon-firma-sonde "$DIST" >/dev/null
+    fi
+    echo "Chiave importata (impronta $NEW, prima $OLD)."
+    ;;
+  *)
+    echo "Uso: netmon-chiave-sonde esporta | importa" >&2
+    exit 1
+    ;;
+esac

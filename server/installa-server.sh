@@ -10,7 +10,7 @@
 # Verifica il sistema, installa i pacchetti, chiede le informazioni necessarie (dominio,
 # notifiche), prova email/Telegram/ntfy, configura HTTPS e alla fine mostra le informazioni
 # da conservare. Si può rilanciare quando si vuole: configurazione, account e storico restano.
-NETMON_VERSION="1.1.20261029-160000"
+NETMON_VERSION="1.1.20261029-170000"
 
 set -uo pipefail
 
@@ -96,7 +96,7 @@ command -v apt-get >/dev/null || die "apt-get non trovato: serve una distribuzio
 command -v systemctl >/dev/null || die "systemd non trovato."
 
 missing=()
-for f in "${FILES[@]}" Caddyfile netmon-vm-upgrade sudoers-netmon-vm netmon-firma-sonde netmon-vm-selfupdate netmon-vm-rollback netmon-vm-rollback-boot.service; do [ -f "$HERE/$f" ] || missing+=("$f"); done
+for f in "${FILES[@]}" Caddyfile netmon-vm-upgrade sudoers-netmon-vm netmon-firma-sonde netmon-chiave-sonde netmon-vm-selfupdate netmon-vm-rollback netmon-vm-rollback-boot.service; do [ -f "$HERE/$f" ] || missing+=("$f"); done
 [ ${#missing[@]} -eq 0 ] || die "Mancano dei file accanto allo script: ${missing[*]}. Estrai di nuovo netmon.zip."
 ok "File del server presenti"
 
@@ -176,6 +176,7 @@ install_files() {
     && visudo -cf /etc/sudoers.d/.netmon-vm.tmp && mv /etc/sudoers.d/.netmon-vm.tmp /etc/sudoers.d/netmon-vm \
     || { rm -f /etc/sudoers.d/.netmon-vm.tmp; false; }' _ "$HERE/sudoers-netmon-vm"
   run "Programma di firma degli aggiornamenti delle sonde" install -m 755 -o root -g root "$HERE/netmon-firma-sonde" /usr/local/sbin/
+  run "Chiave delle sonde nel backup completo" install -m 755 -o root -g root "$HERE/netmon-chiave-sonde" /usr/local/sbin/
   # aggiornamento da pacchetto caricato dal pannello: script e verificatore di root (fuori da /opt/netmon)
   run "Installazione di netmon da pacchetto caricato" install -m 755 -o root -g root "$HERE/netmon-vm-selfupdate" /usr/local/sbin/
   # rollback dell'ultimo pacchetto installato: finestra di 4 ore, poi ripristino automatico

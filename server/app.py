@@ -2,7 +2,7 @@
 
 Avvio: uvicorn app:app --host 127.0.0.1 --port 8000
 """
-__version__ = "1.1.20261029-160000"
+__version__ = "1.1.20261029-170000"
 VERSION = __version__
 import asyncio
 import base64
@@ -5507,6 +5507,48 @@ BACKUP_DBS = ("auth.db", "events.db")
 BACKUP_NEEDED_TABLES = {"auth.db": ("users", "admins", "probes"), "events.db": ("events",)}
 
 
+# Chiave di firma degli aggiornamenti delle sonde: è di root (/etc/netmon), e il servizio la legge e la
+# rimette solo attraverso netmon-chiave-sonde (sudo, due comandi: esporta e importa). Nel backup
+# completo viaggia cifrata con il resto: ripristinata su una VM nuova, le sonde spostate continuano ad
+# accettare gli aggiornamenti dal pannello. Una chiave diversa da quella che conoscono la rifiutano.
+PROBE_KEY_TOOL = "/usr/local/sbin/netmon-chiave-sonde"
+PROBE_KEY_NAME = "chiave-sonde.pem"
+PROBE_KEY_RE = re.compile(rb"\A-----BEGIN PRIVATE KEY-----\n[A-Za-z0-9+/=\n]{40,400}-----END PRIVATE KEY-----\n?\Z")
+
+
+def probe_key_tool(cmd, data=None):
+    """sudo netmon-chiave-sonde esporta|importa: (riuscito, uscita in byte o messaggio)."""
+    import subprocess
+    if not os.path.exists(PROBE_KEY_TOOL):
+        return False, "netmon-chiave-sonde non installato (installa-server.sh --aggiorna)"
+    try:
+        r = subprocess.run(["sudo", "-n", PROBE_KEY_TOOL, cmd], input=data, capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    if r.returncode != 0:
+        return False, (r.stderr or r.stdout).decode("utf-8", "replace").strip()[:300] or f"uscita {r.returncode}"
+    return True, r.stdout
+
+
+def private_key_fingerprint(pem: bytes) -> str:
+    """Impronta della chiave pubblica di una chiave privata, come key_fingerprint (con openssl)."""
+    import subprocess
+    try:
+        r = subprocess.run(["openssl", "pkey", "-pubout"], input=pem, capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if r.returncode != 0 or not r.stdout:
+        return ""
+    return key_fingerprint(r.stdout)
+
+
+def current_probe_key_fp() -> str:
+    try:
+        return key_fingerprint((PROBE_DIST / "update-key.pub").read_bytes())
+    except (OSError, ValueError):
+        return ""
+
+
 def restart_service():
     """Chiude il processo: systemd lo fa ripartire (Restart=always in netmon-server.service)."""
     os._exit(3)
@@ -5537,13 +5579,21 @@ def backup_build(out_zip):
                 shutil.copy2(DATA_DIR / name, tmpdir / name)
                 files[name] = tmpdir / name
         counts = backup_counts(files["auth.db"])
+        ok, key = probe_key_tool("esporta")
+        if ok and not PROBE_KEY_RE.match(key):
+            ok, key = False, "chiave in un formato inatteso"
+        if not ok:
+            log.warning("Backup completo senza la chiave delle sonde: %s", key)
         man = {"format": BACKUP_FORMAT, "version": VERSION, "created": time.time(),
                "server": urlsplit(os.getenv("PUBLIC_URL", "")).hostname or "", "counts": counts,
-               "files": {n: f.stat().st_size for n, f in files.items()}}
+               "files": {n: f.stat().st_size for n, f in files.items()},
+               "probe_key": private_key_fingerprint(key) if ok else ""}
         with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("manifest.json", json.dumps(man, indent=1))
             for name, f in files.items():
                 zf.write(f, name)
+            if ok:
+                zf.writestr(PROBE_KEY_NAME, key)
         return man
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -5566,9 +5616,16 @@ def backup_read(path):
         if not isinstance(man, dict) or man.get("format") != BACKUP_FORMAT:
             raise HTTPException(status_code=422, detail="Il file non è un backup completo di netmon "
                                                         "(per un singolo utente usa «Importa un utente»).")
-        extra = names - {"manifest.json", *BACKUP_FILES}
+        extra = names - {"manifest.json", PROBE_KEY_NAME, *BACKUP_FILES}
         if extra or not set(BACKUP_DBS) <= names:
             raise HTTPException(status_code=422, detail="Backup incompleto o con file inattesi: non si può ripristinare.")
+        man["probe_key"] = ""
+        if PROBE_KEY_NAME in names:
+            info = zf.getinfo(PROBE_KEY_NAME)
+            key = zf.read(PROBE_KEY_NAME) if info.file_size <= 4096 else b""
+            if not PROBE_KEY_RE.match(key):
+                raise HTTPException(status_code=422, detail="Nel backup la chiave delle sonde è danneggiata: non si può ripristinare.")
+            man["probe_key"] = private_key_fingerprint(key)
         if pkgcheck.version_key(str(man.get("version"))) > pkgcheck.version_key(VERSION):
             raise HTTPException(status_code=422, detail=f"Il backup viene da netmon {man.get('version')}, più recente di "
                                                         f"quella installata ({VERSION}): aggiorna prima il server.")
@@ -5591,6 +5648,10 @@ def backup_stage(path):
                 if name in zf.namelist():
                     with zf.open(name) as src, open(RESTORE_DIR / name, "wb") as dst:
                         shutil.copyfileobj(src, dst, 1024 * 1024)
+            if man.get("probe_key"):              # già controllata da backup_read
+                fd = os.open(RESTORE_DIR / PROBE_KEY_NAME, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as dst:
+                    dst.write(zf.read(PROBE_KEY_NAME))
         for name, tables in BACKUP_NEEDED_TABLES.items():
             try:
                 with sqlite3.connect(f"file:{RESTORE_DIR / name}?mode=ro", uri=True, factory=ClosingConnection) as c:
@@ -5646,12 +5707,16 @@ async def api_backup_export(b: BackupExport, request: Request, adm: dict = Depen
         finally:
             plain.unlink(missing_ok=True)             # il backup in chiaro non resta sul disco
         c = man["counts"]
-        log.warning("Backup completo scaricato da %s (%d utenti, %d amministratori, %d sonde)", adm["login"],
-                    c["users"], c["admins"], c["probes"])
+        log.warning("Backup completo scaricato da %s (%d utenti, %d amministratori, %d sonde, chiave delle sonde: %s)",
+                    adm["login"], c["users"], c["admins"], c["probes"], man["probe_key"] or "no")
+        chiave = (f" Contiene anche la chiave di firma degli aggiornamenti delle sonde (impronta {man['probe_key']}): "
+                  "chi ha il file e la sua password può firmare aggiornamenti per le sonde, quindi va custodito come "
+                  "una password. Se non l'hai scaricato tu, cambia le password degli amministratori."
+                  if man["probe_key"] else " La chiave delle sonde non è inclusa.")
         await asyncio.to_thread(admin_notice, "[INFO] Backup completo del server",
                                 f"{adm.get('name') or adm['login']} ha creato un backup completo del server "
-                                f"({c['users']} utenti, {c['admins']} amministratori, {c['probes']} sonde).")
-        return {**c, "size": path.stat().st_size}
+                                f"({c['users']} utenti, {c['admins']} amministratori, {c['probes']} sonde).{chiave}")
+        return {**c, "size": path.stat().st_size, "probe_key": man["probe_key"]}
     asyncio.create_task(transfer_run(tid, "export", work))
     return {"ok": True, "id": tid}
 
@@ -5718,7 +5783,8 @@ async def api_backup_open(b: BackupOpen, adm: dict = Depends(admin_user)):
         man = backup_read(folder / "zip")
         return {"ok": True, "version": man.get("version"), "created": fmt_when(man.get("created")),
                 "server": man.get("server") or "", "counts": man.get("counts") or {}, "size": man["size"],
-                "current": backup_counts(DATA_DIR / "auth.db")}
+                "current": backup_counts(DATA_DIR / "auth.db"),
+                "probe_key": man["probe_key"], "current_probe_key": current_probe_key_fp()}
     return await asyncio.to_thread(open_file)
 
 
@@ -5742,6 +5808,17 @@ async def api_backup_restore(b: BackupRestore, request: Request, adm: dict = Dep
         raise HTTPException(status_code=409, detail="C'è un trasferimento in corso: aspetta che finisca.")
     man = await asyncio.to_thread(backup_stage, whole)
     await asyncio.to_thread(shutil.rmtree, whole.parent, True)
+    key_file, key_msg = RESTORE_DIR / PROBE_KEY_NAME, ""
+    if key_file.exists():
+        try:
+            ok, out = await asyncio.to_thread(probe_key_tool, "importa", key_file.read_bytes())
+        finally:
+            key_file.unlink(missing_ok=True)
+        key_msg = (f" Chiave di firma delle sonde rimessa (impronta {man['probe_key']}): le sonde spostate qui "
+                   "continuano ad aggiornarsi dal pannello." if ok else
+                   f" La chiave di firma delle sonde non è stata rimessa ({out}): le sonde che la conoscono vanno "
+                   "aggiornate una volta in SSH (installa-sonda.sh --aggiorna).")
+        log.warning("Ripristino: chiave delle sonde %s", "importata" if ok else f"non importata: {out}")
     c = man.get("counts") or {}
     log.warning("Ripristino del backup del %s (netmon %s) avviato da %s: il servizio si riavvia",
                 fmt_when(man.get("created")), man.get("version"), adm["login"])
@@ -5749,9 +5826,9 @@ async def api_backup_restore(b: BackupRestore, request: Request, adm: dict = Dep
                             f"{adm.get('name') or adm['login']} ha ripristinato il backup del {fmt_when(man.get('created'))} "
                             f"(netmon {man.get('version')}: {c.get('users', '?')} utenti, {c.get('admins', '?')} "
                             f"amministratori, {c.get('probes', '?')} sonde). I dati di prima sono sulla VM in "
-                            "data/prima-del-ripristino-….")
+                            "data/prima-del-ripristino-…." + key_msg)
     asyncio.get_running_loop().call_later(1.5, restart_service)
-    return {"ok": True, "restart": True}
+    return {"ok": True, "restart": True, "probe_key": key_msg.strip()}
 
 
 # ------------------------------------------------------------------ aggiornamenti programmati (VM e sonde)
@@ -9085,7 +9162,7 @@ section:has(> .probe-head > .led.bad){box-shadow:inset 4px 0 0 var(--bad)}
 .probe-head .fold,.probe-head .infobtn{align-self:flex-start}
 .probe-head .infobtn{margin-top:calc((1.25rem * 1.2 - 1.5rem) / 2)}
 .probe-head .fold{margin-top:calc((1.25rem * 1.2 - 1.1rem) / 2)}
-/* Lo stato (per esempio "installata 1.1.20261029-160000") va SOTTO al titolo, su una riga sua.
+/* Lo stato (per esempio "installata 1.1.20261029-170000") va SOTTO al titolo, su una riga sua.
    Accanto non ci sta quasi mai: o restringeva il titolo, o si restringeva lui fino a diventare
    illeggibile. flex-basis:100% lo manda a capo da solo; order lo tiene per ultimo, cosi' spie,
    "i" e pulsanti restano in alto accanto al titolo anche se nel documento vengono dopo di lui. */
@@ -16362,8 +16439,10 @@ tr.is-blocked td{color:var(--muted)}
         <legend>Backup completo</legend>
         <p class="hint">Tutto il server in un file cifrato: utenti, amministratori, sonde, storico, codici di accesso e
           impostazioni del pannello (invio email compreso). Senza la password del file non si apre: non la salva
-          nessuno, né il server né il file. Restano fuori il file <code>.env</code> (chiave del server, bot Telegram) e
-          le chiavi della VM.</p>
+          nessuno, né il server né il file. Contiene anche la chiave di firma degli aggiornamenti delle sonde: ripristinato
+          su una VM nuova, le sonde continuano ad aggiornarsi dal pannello. Per questo il file e la sua password vanno
+          custoditi come una password di amministratore. Restano fuori il file .env (chiave del server, bot Telegram) e
+          la chiave di rilascio.</p>
         <div class="cols">
           <div><label class="field" for="bk-fpw">Password del file (almeno 12 caratteri)</label>
             <input id="bk-fpw" type="text" class="mono" autocomplete="off" spellcheck="false"></div>
@@ -17812,7 +17891,9 @@ $("#bk-go").onclick = async () => {
     const res = await transferWait(job.id);
     await transferDownload(job.id);
     say("#bk-msg", `Backup scaricato (${fmtBytes(res.size)}): ${res.users} utenti, ${res.admins} amministratori, `
-      + `${res.probes} sonde. Conservalo insieme alla sua password, ma in due posti diversi.`);
+      + `${res.probes} sonde. Conservalo insieme alla sua password, ma in due posti diversi.`
+      + (res.probe_key ? ` Contiene la chiave di firma delle sonde (impronta ${res.probe_key}).`
+                       : " La chiave di firma delle sonde non è inclusa (vedi il registro del server)."));
     $("#bk-fpw").value = $("#bk-fpw2").value = "";
   } catch (e) { say("#bk-msg", e.message, true); }
   finally { $("#bk-go").disabled = false; $("#bk-pass").value = ""; }
@@ -17845,6 +17926,9 @@ $("#rs-up").onclick = async () => {
     ul.appendChild(el("li", "head", `Backup del ${p.created || "?"} · netmon ${p.version || "?"}` + (p.server ? ` · ${p.server}` : "")));
     ul.appendChild(el("li", "ok", `Nel backup: ${c.users} utenti, ${c.admins} amministratori, ${c.probes} sonde (${fmtBytes(p.size)})`));
     ul.appendChild(el("li", "warn", `Adesso sul server: ${now.users} utenti, ${now.admins} amministratori, ${now.probes} sonde: vengono sostituiti`));
+    if (!p.probe_key) ul.appendChild(el("li", "", "Chiave di firma delle sonde: non inclusa (resta quella di questa VM)"));
+    else if (p.probe_key === p.current_probe_key) ul.appendChild(el("li", "ok", `Chiave di firma delle sonde: la stessa di questa VM (${p.probe_key})`));
+    else ul.appendChild(el("li", "warn", `Chiave di firma delle sonde: ${p.probe_key}, al posto di quella di questa VM (${p.current_probe_key || "nessuna"}): le sonde installate con questa VM dovranno accettarla in SSH`));
     say("#rs-msg", "Controlla cosa contiene il backup, poi conferma.");
     $("#rs-word").value = ""; $("#rs-confirm").hidden = false;
   } catch (e) { say("#rs-msg", e.message, true); }
@@ -17858,8 +17942,8 @@ $("#rs-go").onclick = async () => {
   if (!confirm("Sostituire tutti i dati del server con quelli del backup?\n\nIl server si riavvia: dopo accedi con un amministratore del backup.")) return;
   $("#rs-go").disabled = true;
   try {
-    await api("/api/admin/backup/restore", { id: RS.id, password, confirm: "RIPRISTINA" });
-    say("#rs-msg", "Ripristino avviato: il server si riavvia…");
+    const rr = await api("/api/admin/backup/restore", { id: RS.id, password, confirm: "RIPRISTINA" });
+    say("#rs-msg", "Ripristino avviato: il server si riavvia…" + (rr.probe_key ? " " + rr.probe_key : ""));
     await new Promise(r => setTimeout(r, 6000));
     for (const t0 = Date.now(); Date.now() - t0 < 120000;) {
       try { if ((await fetch("/health", { cache: "no-store" })).ok) break; } catch { /* in riavvio */ }

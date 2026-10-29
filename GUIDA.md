@@ -1,6 +1,6 @@
 # NetMon Light — guida completa da zero
 
-*Versione di netmon: 1.1.20261029-160000*
+*Versione di netmon: 1.1.20261029-170000*
 
 Sistema di monitoraggio della rete di casa: una **sonda** (per esempio un Raspberry Pi) pinga i dispositivi
 locali e invia i risultati a un server online, che ti avvisa via email,
@@ -101,6 +101,7 @@ netmon/
 │   ├── netmon-vm-rollback    conferma o rollback dell'ultima installazione da pacchetto
 │   ├── netmon-vm-rollback-boot.service   riarma la finestra di rollback dopo un riavvio della VM
 │   ├── netmon-firma-sonde    firma i programmi e il pacchetto distribuiti alle sonde
+│   ├── netmon-chiave-sonde   chiave di firma delle sonde nel backup completo (esporta, importa)
 │   ├── release-key.pub       chiave pubblica di rilascio: la VM installa solo pacchetti firmati con la
 │   │                         sua privata (sul Mac dell'autore, «Firma NetMon»); la crei tu, vedi sezione 8
 │   ├── sudoers-netmon-vm     i soli comandi di root che il servizio può chiedere
@@ -264,7 +265,7 @@ Caratteri e icone del sito sono quelli di netmon.
 | Database e stato | `/opt/netmon/data/` (`auth.db`, `events.db`, `state.json`, `scans.json`, `inactive.json`) | utente `netmon` |
 | Programmi e pacchetto per le sonde, firmati | `/opt/netmon/probe-dist/` | root |
 | Servizio | `/etc/systemd/system/netmon-server.service` (utente `netmon`, memoria massima 384 MB) | root |
-| Script di sistema | `/usr/local/sbin/netmon-vm-upgrade`, `netmon-vm-selfupdate`, `netmon-vm-rollback`, `netmon-firma-sonde` | root |
+| Script di sistema | `/usr/local/sbin/netmon-vm-upgrade`, `netmon-vm-selfupdate`, `netmon-vm-rollback`, `netmon-firma-sonde`, `netmon-chiave-sonde` | root |
 | Finestra di rollback dopo un riavvio | `/etc/systemd/system/netmon-vm-rollback-boot.service` | root |
 | Verificatore dei pacchetti | `/usr/local/lib/netmon/pkgcheck.py` | root |
 | Chiave pubblica di rilascio (firma dell'autore sui pacchetti) | `/usr/local/share/netmon/release-key.pub` | root |
@@ -2085,17 +2086,27 @@ nessuno. Contiene:
   loro token, codici di accesso, piani e limiti, impostazioni del pannello (invio email compreso);
 - lo storico (`events.db`): misure, eventi, traffico, SpeedTest, FRITZ!Box;
 - lo stato delle sonde, gli SpeedTest periodici, i controlli di sicurezza, gli utenti non attivi e
-  l'informativa modificata (se c'è).
+  l'informativa modificata (se c'è);
+- la **chiave di firma degli aggiornamenti delle sonde** (`/etc/netmon/update-signing.key`, di root): la legge
+  per il backup il programma `netmon-chiave-sonde`, l'unico comando di root concesso al servizio per questo.
+  Ripristinata su una VM nuova, le sonde spostate continuano ad accettare gli aggiornamenti dal pannello.
 
-Restano fuori il file `.env` (chiave del server, bot Telegram, righe `SMTP_…`) e le chiavi della VM: quella con
-cui la VM firma gli aggiornamenti delle sonde e la chiave di rilascio. Gli amministratori ricevono un avviso a
-ogni backup. Conserva il file e la sua password in due posti diversi.
+Restano fuori il file `.env` (chiave del server, bot Telegram, righe `SMTP_…`) e la chiave di rilascio.
+Gli amministratori ricevono un avviso a ogni backup, con l'impronta della chiave delle sonde.
+
+**Attenzione:** con la chiave delle sonde, chi ha il file **e** la sua password può firmare aggiornamenti che le
+sonde installano. Custodisci file e password come la password di un amministratore, in due posti diversi. Se
+ricevi l'avviso di un backup che non hai fatto tu, cambia subito le password degli amministratori. Ogni
+esportazione e importazione della chiave resta nel registro della VM: `sudo journalctl -t netmon-chiave-sonde`.
 
 **Ripristino**: scegli il file, scrivi la sua password e premi **Carica e controlla**: il pannello mostra la data
 e la versione del backup, quanti utenti, amministratori e sonde contiene e quanti ce ne sono adesso. Niente è
-ancora cambiato. Per ripristinare scrivi `RIPRISTINA`, la tua password e premi **Ripristina e riavvia**:
+ancora cambiato. Dice anche se il backup contiene la chiave delle sonde e se è la stessa di questa VM. Per
+ripristinare scrivi `RIPRISTINA`, la tua password e premi **Ripristina e riavvia**:
 
 1. il server controlla il backup (versione non più recente di quella installata, database integri) e lo prepara;
+   se c'è, rimette la chiave delle sonde (la precedente resta in `/etc/netmon/update-signing.key.prima-<data>`) e
+   rifirma i programmi delle sonde;
 2. si riavvia: all'avvio i dati di adesso vanno in `/opt/netmon/data/prima-del-ripristino-<data>/` (resta solo
    l'ultima copia) e quelli del backup prendono il loro posto;
 3. la pagina si ricarica: accedi con un amministratore **del backup**.
@@ -2113,9 +2124,10 @@ sudo systemctl start netmon-server
 sempre), accedi a `/admin` con l'amministratore appena creato e ripristina il backup. Le sonde continuano con il
 loro token se il dominio è lo stesso (il record DNS va spostato sulla VM nuova). Con un dominio diverso, finché
 la vecchia VM è accesa ogni utente entra lì e in *Impostazioni → Sonde → Indirizzo del server* scrive il nuovo
-dominio: la sonda prova la VM nuova con il suo token e ci passa da sola. La VM nuova ha una sua chiave
-per gli aggiornamenti delle sonde: prima di aggiornarle dal pannello, su ogni sonda lancia una volta
-`sudo bash ~/netmon/probe/installa-sonda.sh --aggiorna` e accetta la nuova impronta. Il bot Telegram va rimesso
+dominio: la sonda prova la VM nuova con il suo token e ci passa da sola. Con il backup arriva anche la chiave di
+firma delle sonde, quindi le sonde si aggiornano dal pannello come prima, senza toccarle. Solo con un backup senza
+chiave (fatto da una versione precedente) su ogni sonda va lanciato una volta
+`sudo bash ~/netmon/probe/installa-sonda.sh --aggiorna`, accettando la nuova impronta. Il bot Telegram va rimesso
 nel `.env` (o con *Riconfigurare* dell'installatore).
 
 ### Configurazione delle sonde

@@ -111,3 +111,63 @@ def test_restore_apply_swaps_data_at_startup(tmp_path, monkeypatch):
     assert not staged.exists()
     netmon.restore_apply()                      # senza ripristino pronto non fa nulla
     assert (data / "auth.db").read_text() == "nuovo"
+
+
+# ------------------------------------------------------------------ chiave di firma delle sonde
+def _ed25519():
+    import subprocess
+    return subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519"], capture_output=True, check=True).stdout
+
+
+def test_backup_carries_probe_key_and_restore_puts_it_back(two_users, admin, monkeypatch):
+    """Il backup contiene la chiave di firma delle sonde (letta da netmon-chiave-sonde) e il ripristino
+    la rimette: le sonde spostate sulla VM nuova accettano ancora gli aggiornamenti dal pannello."""
+    key = _ed25519()
+    calls = []
+
+    def tool(cmd, data=None):
+        calls.append((cmd, data))
+        return (True, key) if cmd == "esporta" else (True, b"Chiave importata")
+    monkeypatch.setattr(netmon, "probe_key_tool", tool)
+    pw = "vetro-lampo-trenta-ginepro"
+    res, d = _backup(admin, pw)
+    fp = netmon.private_key_fingerprint(key)
+    assert res["probe_key"] == fp and len(fp) == 19
+    assert b"PRIVATE KEY" not in d.content                       # cifrata con il resto del file
+    tid = "bk" + "k" * 20
+    assert _upload(admin, d.content, tid).status_code == 200
+    p = admin.post("/api/admin/backup/open", {"id": tid, "file_password": pw}).json()
+    assert p["probe_key"] == fp
+    monkeypatch.setattr(netmon, "restart_service", lambda: None)
+    try:
+        r = admin.post("/api/admin/backup/restore", {"id": tid, "password": admin.password, "confirm": "RIPRISTINA"})
+        assert r.status_code == 200, r.text
+        assert ("importa", key) in calls and fp in r.json()["probe_key"]
+        assert not (netmon.RESTORE_DIR / netmon.PROBE_KEY_NAME).exists()    # nessuna copia lasciata sul disco
+    finally:
+        shutil.rmtree(netmon.RESTORE_DIR, ignore_errors=True)
+
+
+def test_backup_without_probe_key_still_works(admin, monkeypatch):
+    monkeypatch.setattr(netmon, "probe_key_tool", lambda cmd, data=None: (False, "non installato"))
+    res, d = _backup(admin, "vetro-lampo-trenta-ginepro")
+    assert res["probe_key"] == "" and res["users"] >= 1
+
+
+def test_restore_refuses_damaged_probe_key(admin, tmp_path, monkeypatch):
+    """Un backup con una «chiave» che non è una chiave privata non si ripristina."""
+    import zipfile
+    monkeypatch.setattr(netmon, "probe_key_tool", lambda cmd, data=None: (False, "no"))
+    plain = tmp_path / "b.zip"
+    netmon.backup_build(plain)
+    bad = tmp_path / "bad.zip"
+    with zipfile.ZipFile(plain) as zi, zipfile.ZipFile(bad, "w") as zo:
+        for item in zi.infolist():
+            zo.writestr(item.filename, zi.read(item.filename))
+        zo.writestr(netmon.PROBE_KEY_NAME, b"#!/bin/sh\nrm -rf /\n")
+    enc = tmp_path / "bad.netmon"
+    netmon.xfer_encrypt(bad, enc, "vetro-lampo-trenta-ginepro")
+    tid = "bk" + "d" * 20
+    assert _upload(admin, enc.read_bytes(), tid).status_code == 200
+    r = admin.post("/api/admin/backup/open", {"id": tid, "file_password": "vetro-lampo-trenta-ginepro"})
+    assert r.status_code == 422 and "chiave delle sonde" in r.json()["detail"]

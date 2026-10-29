@@ -3,7 +3,7 @@ francese). Stesso formato di TRANSLATIONS in i18n.py: chiave il testo italiano, 
 Stanno a parte perché la pagina utente non le carica (sono solo per il pannello e i suoi avvisi).
 Per i testi nuovi: python3 tools/i18n-estrai.py admin --mancanti
 """
-__version__ = "1.1.20261029-160000"
+__version__ = "1.1.20261029-170000"
 
 ADMIN_TRANSLATIONS = {
     "en": {
@@ -2931,3 +2931,60 @@ for _it, _tr in {
     for _lang, _text in zip(("en", "de", "fr"), _tr):
         ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
 del _it, _tr, _lang, _text
+
+# Chiave di firma delle sonde nel backup completo
+_CHIAVE = {
+    "Backup scaricato ({0}): {1} utenti, {2} amministratori, {3} sonde. Conservalo insieme alla sua password, ma in due posti diversi.{4}":
+        ("Backup downloaded ({0}): {1} users, {2} administrators, {3} probes. Keep it together with its password, but in two different places.{4}",
+         "Backup heruntergeladen ({0}): {1} Benutzer, {2} Administratoren, {3} Sonden. Bewahre es mit seinem Passwort auf, aber an zwei verschiedenen Orten.{4}",
+         "Sauvegarde téléchargée ({0}) : {1} utilisateurs, {2} administrateurs, {3} sondes. Conserve-la avec son mot de passe, mais à deux endroits différents.{4}"),
+    "Contiene la chiave di firma delle sonde (impronta {0}).":
+        ("It contains the probe signing key (fingerprint {0}).", "Es enthält den Signaturschlüssel der Sonden (Fingerabdruck {0}).",
+         "Elle contient la clé de signature des sondes (empreinte {0})."),
+    "La chiave di firma delle sonde non è inclusa (vedi il registro del server).":
+        ("The probe signing key is not included (see the server log).", "Der Signaturschlüssel der Sonden ist nicht enthalten (siehe Serverprotokoll).",
+         "La clé de signature des sondes n'est pas incluse (voir le journal du serveur)."),
+    "La chiave delle sonde non è inclusa.": ("The probe key is not included.", "Der Sondenschlüssel ist nicht enthalten.",
+                                             "La clé des sondes n'est pas incluse."),
+    "Contiene anche la chiave di firma degli aggiornamenti delle sonde (impronta {0}): chi ha il file e la sua password può firmare aggiornamenti per le sonde, quindi va custodito come una password. Se non l'hai scaricato tu, cambia le password degli amministratori.":
+        ("It also contains the key that signs probe updates (fingerprint {0}): whoever has the file and its password can sign updates for the probes, so keep it like a password. If you did not download it, change the administrators' passwords.",
+         "Es enthält auch den Schlüssel, der die Updates der Sonden signiert (Fingerabdruck {0}): Wer die Datei und ihr Passwort hat, kann Updates für die Sonden signieren; bewahre sie also wie ein Passwort auf. Wenn du sie nicht heruntergeladen hast, ändere die Passwörter der Administratoren.",
+         "Elle contient aussi la clé qui signe les mises à jour des sondes (empreinte {0}) : qui a le fichier et son mot de passe peut signer des mises à jour pour les sondes, garde-la donc comme un mot de passe. Si ce n'est pas toi qui l'as téléchargée, change les mots de passe des administrateurs."),
+    "{0} ha creato un backup completo del server ({1} utenti, {2} amministratori, {3} sonde).{4}":
+        ("{0} created a full backup of the server ({1} users, {2} administrators, {3} probes).{4}",
+         "{0} hat ein vollständiges Backup des Servers erstellt ({1} Benutzer, {2} Administratoren, {3} Sonden).{4}",
+         "{0} a créé une sauvegarde complète du serveur ({1} utilisateurs, {2} administrateurs, {3} sondes).{4}"),
+    "Chiave di firma delle sonde rimessa (impronta {0}): le sonde spostate qui continuano ad aggiornarsi dal pannello.":
+        ("Probe signing key restored (fingerprint {0}): probes moved here keep updating from the panel.",
+         "Signaturschlüssel der Sonden wiederhergestellt (Fingerabdruck {0}): hierher verschobene Sonden werden weiter über das Panel aktualisiert.",
+         "Clé de signature des sondes remise (empreinte {0}) : les sondes déplacées ici continuent de se mettre à jour depuis le panneau."),
+    "La chiave di firma delle sonde non è stata rimessa ({0}): le sonde che la conoscono vanno aggiornate una volta in SSH (installa-sonda.sh --aggiorna).":
+        ("The probe signing key was not restored ({0}): probes that know it must be updated once over SSH (installa-sonda.sh --aggiorna).",
+         "Der Signaturschlüssel der Sonden wurde nicht wiederhergestellt ({0}): Sonden, die ihn kennen, müssen einmal per SSH aktualisiert werden (installa-sonda.sh --aggiorna).",
+         "La clé de signature des sondes n'a pas été remise ({0}) : les sondes qui la connaissent doivent être mises à jour une fois en SSH (installa-sonda.sh --aggiorna)."),
+    "Chiave di firma delle sonde: la stessa di questa VM ({0})":
+        ("Probe signing key: the same as this VM ({0})", "Signaturschlüssel der Sonden: derselbe wie auf dieser VM ({0})",
+         "Clé de signature des sondes : la même que sur cette VM ({0})"),
+    "Chiave di firma delle sonde: non inclusa (resta quella di questa VM)":
+        ("Probe signing key: not included (this VM's key stays)", "Signaturschlüssel der Sonden: nicht enthalten (der Schlüssel dieser VM bleibt)",
+         "Clé de signature des sondes : non incluse (celle de cette VM reste)"),
+    "Chiave di firma delle sonde: {0}, al posto di quella di questa VM ({1}): le sonde installate con questa VM dovranno accettarla in SSH":
+        ("Probe signing key: {0}, replacing this VM's key ({1}): probes installed with this VM will have to accept it over SSH",
+         "Signaturschlüssel der Sonden: {0} statt des Schlüssels dieser VM ({1}): mit dieser VM installierte Sonden müssen ihn per SSH akzeptieren",
+         "Clé de signature des sondes : {0}, à la place de celle de cette VM ({1}) : les sondes installées avec cette VM devront l'accepter en SSH"),
+    "Nel backup la chiave delle sonde è danneggiata: non si può ripristinare.":
+        ("In the backup the probe key is damaged: it cannot be restored.", "Im Backup ist der Sondenschlüssel beschädigt: Wiederherstellung nicht möglich.",
+         "Dans la sauvegarde, la clé des sondes est endommagée : impossible de la restaurer."),
+    "netmon-chiave-sonde non installato (installa-server.sh --aggiorna)":
+        ("netmon-chiave-sonde not installed (installa-server.sh --aggiorna)", "netmon-chiave-sonde nicht installiert (installa-server.sh --aggiorna)",
+         "netmon-chiave-sonde non installé (installa-server.sh --aggiorna)"),
+    "chiave in un formato inatteso": ("key in an unexpected format", "Schlüssel in einem unerwarteten Format", "clé dans un format inattendu"),
+    "Tutto il server in un file cifrato: utenti, amministratori, sonde, storico, codici di accesso e impostazioni del pannello (invio email compreso). Senza la password del file non si apre: non la salva nessuno, né il server né il file. Contiene anche la chiave di firma degli aggiornamenti delle sonde: ripristinato su una VM nuova, le sonde continuano ad aggiornarsi dal pannello. Per questo il file e la sua password vanno custoditi come una password di amministratore. Restano fuori il file .env (chiave del server, bot Telegram) e la chiave di rilascio.":
+        ("The whole server in an encrypted file: users, administrators, probes, history, access codes and panel settings (email sending included). Without the file password it cannot be opened: nobody stores it, neither the server nor the file. It also contains the key that signs probe updates: restored on a new VM, the probes keep updating from the panel. For this reason the file and its password must be kept like an administrator password. The .env file (server key, Telegram bot) and the release key are left out.",
+         "Der ganze Server in einer verschlüsselten Datei: Benutzer, Administratoren, Sonden, Verlauf, Zugangscodes und Panel-Einstellungen (E-Mail-Versand inbegriffen). Ohne das Passwort der Datei lässt sie sich nicht öffnen: niemand speichert es, weder der Server noch die Datei. Sie enthält auch den Schlüssel, der die Updates der Sonden signiert: auf einer neuen VM wiederhergestellt, werden die Sonden weiter über das Panel aktualisiert. Deshalb müssen die Datei und ihr Passwort wie ein Administratorpasswort aufbewahrt werden. Nicht enthalten sind die Datei .env (Serverschlüssel, Telegram-Bot) und der Release-Schlüssel.",
+         "Tout le serveur dans un fichier chiffré : utilisateurs, administrateurs, sondes, historique, codes d'accès et réglages du panneau (envoi d'e-mails compris). Sans le mot de passe du fichier, il ne s'ouvre pas : personne ne le conserve, ni le serveur ni le fichier. Il contient aussi la clé qui signe les mises à jour des sondes : restauré sur une nouvelle VM, les sondes continuent de se mettre à jour depuis le panneau. C'est pourquoi le fichier et son mot de passe doivent être gardés comme un mot de passe d'administrateur. Le fichier .env (clé du serveur, bot Telegram) et la clé de publication restent en dehors."),
+}
+for _it, _tr in _CHIAVE.items():
+    for _lang, _text in zip(("en", "de", "fr"), _tr):
+        ADMIN_TRANSLATIONS[_lang].setdefault(_it, _text)
+del _CHIAVE, _it, _tr, _lang, _text
